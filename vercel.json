@@ -11,11 +11,11 @@
     "backend": {
       "root": "backend",
       "runtime": "node",
-      "entrypoint": "api/[...path].ts",
+      "entrypoint": "src/vercel.ts",
       "installCommand": "npm ci",
       "buildCommand": "npm run build",
       "functions": {
-        "api/[...path].ts": {
+        "src/vercel.ts": {
           "maxDuration": 60
         }
       }
