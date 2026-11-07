@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "tsx watch --exclude \"src/generated/prisma/**\" src/server.ts",
-    "start": "node dist/server.js",
+    "dev": "tsx watch --exclude \"src/generated/prisma/**\" src/dev-server.ts",
+    "start": "node dist/src/dev-server.js",
     "build": "prisma generate && tsc",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
+    "db:seed:admin": "tsx prisma/seed-admin.ts",
     "db:set-admin-password": "tsx prisma/set-admin-password.ts",
     "db:check": "ts-node src/index.ts"
   },

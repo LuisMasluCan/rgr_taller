@@ -294,7 +294,7 @@ function OrderQuoteView({ mode }: Props) {
                   <tr key={item.id} className="text-[10px] text-slate-400 hover:bg-slate-900/70">
                     <td className="px-3 py-3 pl-5 font-semibold text-slate-400">{String(index + 1).padStart(2, '0')}</td>
                     <td className="px-3 py-3"><select aria-label={`Tipo de ${item.description || `ítem ${index + 1}`}`} value={item.type} onChange={(event) => updateItem(item.id, { type: event.target.value as OrderServiceItem['type'] })} className={`h-8 w-[120px] rounded-md border border-slate-700 px-2 text-[10px] font-semibold ${typeColor}`}>{typeOptions.map((type) => <option key={type}>{type}</option>)}</select></td>
-                    <td className="px-3 py-3"><div className="w-[190px]"><input aria-label={`Ítem ${index + 1}`} value={item.description} onFocus={() => setActiveQuoteItemId(item.id)} onBlur={() => setActiveQuoteItemId(null)} onChange={(event) => { setActiveQuoteItemId(item.id); updateItem(item.id, { description: event.target.value }) }} className="h-8 w-full rounded-md border border-slate-700 px-2 text-[10px] outline-none focus:border-slate-700" />{activeQuoteItemId === item.id && item.description.trim() && (() => {
+                    <td className="px-3 py-3"><div className="w-[190px]"><input aria-label={`Ítem ${index + 1}`} value={item.description} onFocus={() => setActiveQuoteItemId(item.id)} onBlur={() => window.setTimeout(() => setActiveQuoteItemId((activeId) => activeId === item.id ? null : activeId), 150)} onChange={(event) => { setActiveQuoteItemId(item.id); updateItem(item.id, { description: event.target.value }) }} className="h-8 w-full rounded-md border border-slate-700 px-2 text-[10px] outline-none focus:border-slate-700" />{activeQuoteItemId === item.id && item.description.trim() && (() => {
                       const matches = inventory.filter((candidate) =>
                         `${candidate.description} ${candidate.reference}`.toLowerCase().includes(item.description.trim().toLowerCase()),
                       )
@@ -306,13 +306,13 @@ function OrderQuoteView({ mode }: Props) {
                             : candidate.type === 'Insumo' || candidate.id.startsWith('INS')
                               ? 'Insumo'
                               : 'Repuesto'
-                        return <button type="button" key={candidate.id} onPointerDown={(event) => event.preventDefault()} onClick={() => {
+                        return <button type="button" key={candidate.id} onClick={() => {
                           updateItem(item.id, {
                             type,
                             description: candidate.description,
                             reference: candidate.reference,
                             cost: candidate.cost,
-                            marginPercent: candidate.marginPercent,
+                            marginPercent: candidate.marginPercent ?? (candidate.cost > 0 ? (candidate.price / candidate.cost - 1) * 100 : 0),
                             price: candidate.price,
                             taxRate: candidate.taxRate,
                             laborHours: candidate.laborHours,

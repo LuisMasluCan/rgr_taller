@@ -77,6 +77,7 @@ const blankDraft = (): OrderDraft => ({
 
 const maxArrivalPhotos = 10
 const maxPhotoSize = 12 * 1024 * 1024
+const maxOptimizedPhotoSize = 480 * 1024
 const qualityResolutions = [
   'Falla resuelta',
   'Motor armado',
@@ -144,18 +145,50 @@ async function optimizePhoto(file: File): Promise<OrderPhoto> {
     image.onerror = () => reject(new Error(`No se pudo procesar la fotografía ${file.name}.`))
   })
 
-  const scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight))
   const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
   const context = canvas.getContext('2d')
   if (!context) throw new Error('El navegador no pudo preparar la fotografía.')
-  context.drawImage(image, 0, 0, canvas.width, canvas.height)
 
-  return {
-    name: file.name,
-    dataUrl: canvas.toDataURL('image/jpeg', 0.78),
+  let scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight))
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    for (const quality of [0.78, 0.68, 0.58, 0.48]) {
+      const dataUrl = canvas.toDataURL('image/jpeg', quality)
+      const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+      const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0
+      if (Math.floor(base64.length * 3 / 4) - padding <= maxOptimizedPhotoSize) {
+        return { name: file.name, dataUrl }
+      }
+    }
+    scale *= 0.8
   }
+  throw new Error(`No se pudo reducir ${file.name} al tamaño permitido.`)
+}
+
+async function savePhoto(photo: OrderPhoto): Promise<OrderPhoto> {
+  const response = await fetch('/api/photos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(photo),
+  })
+  let result: unknown
+  try {
+    result = await response.json()
+  } catch {
+    throw new Error(`No se pudo guardar ${photo.name}: la API devolvió una respuesta inválida.`)
+  }
+  if (!response.ok) {
+    const message = typeof result === 'object' && result !== null && 'error' in result && typeof result.error === 'string'
+      ? result.error
+      : `La API respondió con el estado ${response.status}.`
+    throw new Error(`No se pudo guardar ${photo.name}: ${message}`)
+  }
+  if (typeof result !== 'object' || result === null || !('dataUrl' in result) || typeof result.dataUrl !== 'string') {
+    throw new Error(`No se pudo guardar ${photo.name}: la API devolvió datos inválidos.`)
+  }
+  return { name: photo.name, dataUrl: result.dataUrl }
 }
 
 function OrdersView() {
@@ -438,8 +471,11 @@ function OrdersView() {
     setPhotosProcessing(true)
     setPhotoError('')
     try {
-      const photos = await Promise.all(files.map(optimizePhoto))
-      setDraft((current) => ({ ...current, arrivalPhotos: [...current.arrivalPhotos, ...photos] }))
+      for (const file of files) {
+        const optimized = await optimizePhoto(file)
+        const uploaded = await savePhoto(optimized)
+        setDraft((current) => ({ ...current, arrivalPhotos: [...current.arrivalPhotos, uploaded] }))
+      }
     } catch (error) {
       setPhotoError(error instanceof Error ? error.message : 'No se pudieron procesar las fotografías.')
     } finally {
@@ -447,7 +483,7 @@ function OrdersView() {
     }
   }
 
-  const saveOrder = (event: FormEvent<HTMLFormElement>) => {
+  const saveOrder = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!selectedClient || photosProcessing || orderSubmissionStarted.current) return
     const selectedVehicle = selectedClient.vehicles.find((vehicle) => vehicle.id === draft.vehicleId)
@@ -456,6 +492,18 @@ function OrdersView() {
     if (!Number.isFinite(mileage) || mileage < 0) return
     orderSubmissionStarted.current = true
     setOrderSubmitting(true)
+
+    const arrivalPhotos: OrderPhoto[] = []
+    try {
+      for (const photo of draft.arrivalPhotos) {
+        arrivalPhotos.push(photo.dataUrl.startsWith('data:image/') ? await savePhoto(photo) : photo)
+      }
+    } catch (error) {
+      orderSubmissionStarted.current = false
+      setOrderSubmitting(false)
+      setPhotoError(error instanceof Error ? error.message : 'No se pudieron guardar las fotografías.')
+      return
+    }
 
     const existing = orders.find((order) => order.id === editingOrderId)
     const changedAt = currentTimestamp()
@@ -494,7 +542,7 @@ function OrdersView() {
       payments: editingOrderId ? existing?.payments : [],
       sourceQuoteId: editingOrderId ? existing?.sourceQuoteId : selectedQuotation?.id,
       mileage,
-      arrivalPhotos: draft.arrivalPhotos,
+      arrivalPhotos,
       date: new Intl.DateTimeFormat('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(`${draft.dateISO}T12:00:00`)),
       customer: selectedClient.name,
       email: selectedClient.email,
@@ -532,6 +580,7 @@ function OrdersView() {
       return next
     }, { replace: true })
     setModalOpen(false)
+    setOrderSubmitting(false)
   }
 
   const confirmAdvanceStage = (orderId: string, sendWhatsApp = false) => {
@@ -1099,7 +1148,7 @@ function OrdersView() {
                   return <tr key={item.id} className="text-slate-200">
                     <td className="whitespace-nowrap px-2 py-2 pl-4 text-[10px] text-slate-400">{String(index + 1).padStart(2, '0')}</td>
                     <td className="px-2 py-2"><select aria-label={`Tipo de ${item.description || `ítem ${index + 1}`}`} disabled={!canEditOrderItems} value={item.type} onChange={(event) => updateOrderItem(item.id, { type: event.target.value as OrderServiceItem['type'] })} className={`${inputClass} min-w-[130px]`} >{availableTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></td>
-                    <td className="px-2 py-2"><div className="min-w-[220px]"><input aria-label={`Descripción de ítem ${index + 1}`} disabled={!canEditOrderItems} value={item.description} onFocus={() => setActiveOrderItemDescriptionId(item.id)} onBlur={() => setActiveOrderItemDescriptionId(null)} onChange={(event) => { setActiveOrderItemDescriptionId(item.id); updateOrderItem(item.id, { description: event.target.value }) }} placeholder="Ítem adicional" className={`${inputClass} min-w-[220px]`} />{canEditOrderItems && activeOrderItemDescriptionId === item.id && item.description.trim() && (() => {
+                    <td className="px-2 py-2"><div className="min-w-[220px]"><input aria-label={`Descripción de ítem ${index + 1}`} disabled={!canEditOrderItems} value={item.description} onFocus={() => setActiveOrderItemDescriptionId(item.id)} onBlur={() => window.setTimeout(() => setActiveOrderItemDescriptionId((activeId) => activeId === item.id ? null : activeId), 150)} onChange={(event) => { setActiveOrderItemDescriptionId(item.id); updateOrderItem(item.id, { description: event.target.value }) }} placeholder="Ítem adicional" className={`${inputClass} min-w-[220px]`} />{canEditOrderItems && activeOrderItemDescriptionId === item.id && item.description.trim() && (() => {
                       const matches = inventory.filter((candidate) =>
                         (itemOrder.status !== 'Repuestos' || candidate.type === 'Repuesto' || candidate.type === 'Insumo' || candidate.id.startsWith('REP') || candidate.id.startsWith('INS')) &&
                         `${candidate.description} ${candidate.reference}`.toLowerCase().includes(item.description.trim().toLowerCase()),
@@ -1112,7 +1161,7 @@ function OrdersView() {
                             : candidate.type === 'Insumo' || candidate.id.startsWith('INS')
                               ? 'Insumo'
                               : 'Repuesto'
-                        return <button type="button" key={candidate.id} onPointerDown={(event) => event.preventDefault()} onClick={() => {
+                        return <button type="button" key={candidate.id} onClick={() => {
                           updateOrderItem(item.id, {
                           type,
                           description: candidate.description,
@@ -1215,7 +1264,7 @@ function OrdersView() {
                   <input aria-label="Subir fotografías de ingreso" type="file" accept="image/*" multiple disabled={draft.arrivalPhotos.length >= maxArrivalPhotos || photosProcessing} onChange={handlePhotoSelection} className="sr-only" />
                   <Camera size={18} className="text-slate-400" />
                   <span className="text-xs font-semibold text-slate-300">{photosProcessing ? 'Preparando fotografías…' : 'Selecciona o toma fotos de la unidad'}</span>
-                  <span className="text-[10px] text-slate-400">Imágenes · máximo {maxArrivalPhotos} fotos · 12 MB por archivo</span>
+                  <span className="text-[10px] text-slate-400">Imágenes · máximo {maxArrivalPhotos} fotos · 12 MB por archivo. Se comprimen y guardan en Neon.</span>
                 </label>
                 {photoError && <p role="alert" className="mt-2 text-[11px] font-medium text-red-300">{photoError}</p>}
                 {draft.arrivalPhotos.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{draft.arrivalPhotos.map((photo, index) => <div key={`${photo.name}-${index}`} className="group relative overflow-hidden rounded-lg border border-slate-700"><img src={photo.dataUrl} alt={`Foto de ingreso: ${photo.name}`} className="h-24 w-full object-cover" /><span className="block truncate px-2 py-1 text-[9px] text-slate-400">{photo.name}</span><button type="button" aria-label={`Quitar foto ${photo.name}`} onClick={() => setDraft((current) => ({ ...current, arrivalPhotos: current.arrivalPhotos.filter((_, photoIndex) => photoIndex !== index) }))} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900/90 text-red-300 shadow hover:bg-slate-900"><Trash2 size={12} /></button></div>)}</div>}

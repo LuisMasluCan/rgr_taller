@@ -349,3 +349,11 @@ model WorkshopState {
   version   Int      @default(1)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 }
+
+model WorkshopPhoto {
+  id          String   @id
+  name        String
+  contentType String
+  data        Bytes
+  createdAt   DateTime @default(now())
+}

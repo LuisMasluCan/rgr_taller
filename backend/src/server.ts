@@ -1,16 +1,9 @@
-import 'dotenv/config'
-import dotenv from 'dotenv'
-import { createHash, randomBytes } from 'node:crypto'
-import path from 'node:path'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { compare } from 'bcryptjs'
 import { Prisma, Role } from './generated/prisma/client'
 import { prisma } from './lib/prisma'
 
-dotenv.config({ path: path.resolve(process.cwd(), '..', '.env') })
-
-const port = Number(process.env.API_PORT ?? 3001)
-const host = process.env.API_HOST ?? '127.0.0.1'
 const frontendPort = Number(process.env.VITE_PORT ?? 5173)
 const defaultOrigins = [
   `http://localhost:${frontendPort}`,
@@ -26,7 +19,9 @@ const allowedOrigins = new Set(
   ],
 )
 const stateId = 'workshop'
-const maximumBodyBytes = 8 * 1024 * 1024
+const maximumBodyBytes = 4 * 1024 * 1024
+const maximumPhotoRequestBytes = 4.25 * 1024 * 1024
+const maximumPhotoBytes = 3 * 1024 * 1024
 const sessionCookieName = 'rgr_admin_session'
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7
 const loginWindowMilliseconds = 15 * 60 * 1000
@@ -107,7 +102,14 @@ function sessionCookie(token: string, maxAge: number): string {
 
 function requestOriginAllowed(request: IncomingMessage): boolean {
   const origin = request.headers.origin
-  const allowed = !origin || allowedOrigins.has(origin)
+  const forwardedHost = request.headers['x-forwarded-host']
+  const host = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost) ?? request.headers.host
+  const forwardedProtocol = request.headers['x-forwarded-proto']
+  const protocol = (Array.isArray(forwardedProtocol) ? forwardedProtocol[0] : forwardedProtocol)
+    ?.split(',')[0]
+    ?.trim() ?? (process.env.NODE_ENV === 'production' ? 'https' : 'http')
+  const sameOrigin = host ? origin === `${protocol}://${host}` : false
+  const allowed = !origin || allowedOrigins.has(origin) || sameOrigin
   if (!allowed) console.warn(`Rejected request from unconfigured origin: ${origin}`)
   return allowed
 }
@@ -216,7 +218,7 @@ async function getOrCreateWorkshopState() {
   }
 }
 
-const server = createServer(async (request, response) => {
+export async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const origin = request.headers.origin
   if (origin && allowedOrigins.has(origin)) {
     response.setHeader('Access-Control-Allow-Origin', origin)
@@ -347,6 +349,92 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  const photoMatch = url.pathname.match(/^\/api\/photos\/([0-9a-f-]{36})$/i)
+  if (photoMatch && request.method === 'GET') {
+    try {
+      const user = await authenticatedUser(request)
+      if (!user) {
+        sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
+        return
+      }
+      const photo = await prisma.workshopPhoto.findUnique({ where: { id: photoMatch[1] } })
+      if (!photo) {
+        sendJson(response, 404, { error: 'No se encontró la fotografía.' })
+        return
+      }
+      response.writeHead(200, {
+        'Content-Type': photo.contentType,
+        'Content-Length': photo.data.byteLength,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      })
+      response.end(photo.data)
+    } catch (error) {
+      console.error('Unable to load workshop photo:', error)
+      sendJson(response, 503, { error: 'No se pudo cargar la fotografía.' })
+    }
+    return
+  }
+
+  if (url.pathname === '/api/photos' && request.method === 'POST') {
+    if (!requestOriginAllowed(request)) {
+      sendJson(response, 403, { error: 'Origen de solicitud no permitido.' })
+      return
+    }
+    try {
+      const user = await authenticatedUser(request)
+      if (!user) {
+        sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
+        return
+      }
+    } catch (error) {
+      console.error('Unable to verify photo upload session:', error)
+      sendJson(response, 503, { error: 'No se pudo verificar la sesión.' })
+      return
+    }
+
+    let payload: unknown
+    try {
+      payload = await readJsonBody(request, maximumPhotoRequestBytes)
+    } catch (error) {
+      const status = isRecord(error) && typeof error.status === 'number' ? error.status : 400
+      sendJson(response, status, { error: error instanceof Error ? error.message : 'Solicitud inválida.' })
+      return
+    }
+    if (!isRecord(payload) || typeof payload.name !== 'string' || typeof payload.dataUrl !== 'string') {
+      sendJson(response, 400, { error: 'Se requiere el nombre y el contenido de la fotografía.' })
+      return
+    }
+
+    const imageMatch = payload.dataUrl.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]*={0,2})$/)
+    if (!imageMatch) {
+      sendJson(response, 400, { error: 'La fotografía debe estar en formato JPEG, PNG o WebP.' })
+      return
+    }
+    const data = Buffer.from(imageMatch[2], 'base64')
+    if (!data.length || data.byteLength > maximumPhotoBytes || data.toString('base64') !== imageMatch[2]) {
+      sendJson(response, 413, { error: 'La fotografía supera el límite permitido de 3 MB.' })
+      return
+    }
+
+    try {
+      const id = randomUUID()
+      await prisma.workshopPhoto.create({
+        data: {
+          id,
+          name: payload.name.slice(0, 255),
+          contentType: `image/${imageMatch[1]}`,
+          data,
+        },
+      })
+      sendJson(response, 201, { name: payload.name, dataUrl: `/api/photos/${id}` })
+    } catch (error) {
+      console.error('Unable to save workshop photo:', error)
+      sendJson(response, 503, { error: 'No se pudo guardar la fotografía en Neon.' })
+    }
+    return
+  }
+
   if (url.pathname === '/api/state' && request.method === 'GET') {
     try {
       const user = await authenticatedUser(request)
@@ -418,16 +506,4 @@ const server = createServer(async (request, response) => {
   }
 
   sendJson(response, 404, { error: 'Ruta no encontrada.' })
-})
-
-server.listen(port, host, () => {
-  console.info(`RGR Taller API listening at http://${host}:${port}`)
-})
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    server.close(() => {
-      void prisma.$disconnect().finally(() => process.exit(0))
-    })
-  })
 }
