@@ -10,8 +10,6 @@
     },
     "backend": {
       "root": "backend",
-      "runtime": "node",
-      "entrypoint": "api/[...path].ts",
       "installCommand": "npm ci",
       "buildCommand": "npm run build",
       "functions": {
