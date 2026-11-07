@@ -11,13 +11,12 @@
     "backend": {
       "root": "backend",
       "runtime": "node",
-      "entrypoint": "src/vercel.cjs",
+      "entrypoint": "src/vercel.bundle.cjs",
       "installCommand": "npm ci",
       "buildCommand": "npm run build",
       "functions": {
-        "src/vercel.cjs": {
-          "maxDuration": 60,
-          "includeFiles": "dist/vercel.bundle.cjs"
+        "src/vercel.bundle.cjs": {
+          "maxDuration": 60
         }
       }
     }
