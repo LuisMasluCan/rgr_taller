@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { prisma } from './lib/prisma'
+import { prisma } from '../src/lib/prisma'
 
 async function main(): Promise<void> {
   const serviceOrders = await prisma.serviceOrder.findMany({
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
 
 main()
   .catch((error: unknown) => {
-    console.error('No se pudo consultar las órdenes de servicio:', error)
+    console.error('No se pudo consultar las ordenes de servicio:', error)
     process.exitCode = 1
   })
   .finally(async () => {

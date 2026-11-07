@@ -12,7 +12,7 @@
     "db:seed": "prisma db seed",
     "db:seed:admin": "tsx prisma/seed-admin.ts",
     "db:set-admin-password": "tsx prisma/set-admin-password.ts",
-    "db:check": "ts-node src/index.ts"
+    "db:check": "ts-node prisma/check-db.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",
