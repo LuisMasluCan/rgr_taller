@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch --exclude \"src/generated/prisma/**\" src/dev-server.ts",
     "start": "node dist/src/dev-server.js",
-    "build": "prisma generate && tsc && esbuild src/vercel.ts --bundle --platform=node --format=cjs --outfile=dist/vercel.bundle.cjs",
+    "build": "prisma generate && tsc && esbuild src/vercel-entry.ts --bundle --platform=node --format=cjs --outfile=dist/vercel.bundle.cjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
