@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { compare } from 'bcryptjs'
-import { Prisma, Role } from './generated/prisma/client'
-import { prisma } from './lib/prisma'
+import { Prisma, Role } from '../generated/prisma/client'
+import { prisma } from './prisma'
 
 const frontendPort = Number(process.env.VITE_PORT ?? 5173)
 const defaultOrigins = [
