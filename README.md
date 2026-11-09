@@ -33,7 +33,7 @@ Vite reenvía `/api` al servidor local en `127.0.0.1:3001`. Comprueba la conexi�
 
 ## Persistencia y alcance actual
 
-Por ahora, la API guarda las colecciones editadas por la interfaz como un snapshot JSONB versionado en `WorkshopState`. La interfaz muestra cuándo hay cambios en curso y advierte antes de salir si todavía no se guardaron. Las cuentas bancarias y categorías iniciales se leen de sus tablas relacionales; los cambios operativos de la interfaz todavía **no** se sincronizan con `Customer`, `Vehicle`, `ServiceOrder`, `Invoice` u otras tablas relacionales. La tabla normalizada no debe usarse aún como fuente de reportes externos.
+Por ahora, la API guarda las colecciones editadas por la interfaz como un snapshot JSONB versionado en `WorkshopState`. Si varios dispositivos guardan a la vez, la interfaz combina los cambios independientes y reintenta automáticamente; los registros se combinan por ID para conservar, por ejemplo, órdenes creadas en otra sesión. La interfaz muestra cuándo hay cambios en curso y advierte antes de salir si todavía no se guardaron. Las cuentas bancarias y categorías iniciales se leen de sus tablas relacionales; los cambios operativos de la interfaz todavía **no** se sincronizan con `Customer`, `Vehicle`, `ServiceOrder`, `Invoice` u otras tablas relacionales. La tabla normalizada no debe usarse aún como fuente de reportes externos.
 
 El acceso está limitado a cuentas con rol `ADMIN`; no hay registro de usuarios y la interfaz ofrece una sola cuenta operativa por ahora. El servidor almacena sesiones opacas con hash en Neon y las entrega en una cookie `HttpOnly`, `SameSite=Strict`. Las fotografías se sirven solo a sesiones autenticadas y se guardan fuera del snapshot JSON.
 

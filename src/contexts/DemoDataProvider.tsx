@@ -56,6 +56,73 @@ function parseWorkshopData(value: unknown): WorkshopData {
   return value as unknown as WorkshopData
 }
 
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function getArrayItemKey(items: unknown[][]): 'id' | 'name' | null {
+  for (const key of ['id', 'name'] as const) {
+    if (items.every((list) => {
+      const keys = list.map((item) => isRecord(item) && typeof item[key] === 'string' ? item[key] : null)
+      return keys.every((itemKey): itemKey is string => itemKey !== null) &&
+        new Set(keys).size === keys.length
+    })) {
+      return key
+    }
+  }
+  return null
+}
+
+function mergeConcurrentValue(base: unknown, local: unknown, remote: unknown): unknown {
+  if (sameJsonValue(local, base)) return remote
+  if (sameJsonValue(remote, base) || sameJsonValue(local, remote)) return local
+
+  if (Array.isArray(base) && Array.isArray(local) && Array.isArray(remote)) {
+    const key = getArrayItemKey([base, local, remote])
+    if (!key) return local
+
+    const baseItems = new Map(base.map((item) => [(item as Record<string, unknown>)[key] as string, item]))
+    const localItems = new Map(local.map((item) => [(item as Record<string, unknown>)[key] as string, item]))
+    const remoteItems = new Map(remote.map((item) => [(item as Record<string, unknown>)[key] as string, item]))
+    const keys = new Set([...remoteItems.keys(), ...localItems.keys()])
+    const merged: unknown[] = []
+
+    for (const itemKey of keys) {
+      const baseItem = baseItems.get(itemKey)
+      const localItem = localItems.get(itemKey)
+      const remoteItem = remoteItems.get(itemKey)
+      if (localItem === undefined) {
+        if (baseItem === undefined && remoteItem !== undefined) merged.push(remoteItem)
+      } else if (remoteItem === undefined) {
+        if (baseItem === undefined || !sameJsonValue(localItem, baseItem)) merged.push(localItem)
+      } else {
+        merged.push(mergeConcurrentValue(baseItem, localItem, remoteItem))
+      }
+    }
+    return merged
+  }
+
+  if (isRecord(base) && isRecord(local) && isRecord(remote)) {
+    const merged: Record<string, unknown> = {}
+    const keys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])
+    for (const key of keys) {
+      const hasBase = Object.hasOwn(base, key)
+      const hasLocal = Object.hasOwn(local, key)
+      const hasRemote = Object.hasOwn(remote, key)
+      if (!hasLocal) {
+        if (!hasBase && hasRemote) merged[key] = remote[key]
+      } else if (!hasRemote) {
+        if (!hasBase || !sameJsonValue(local[key], base[key])) merged[key] = local[key]
+      } else {
+        merged[key] = mergeConcurrentValue(base[key], local[key], remote[key])
+      }
+    }
+    return merged
+  }
+
+  return local
+}
+
 async function responseError(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json()
@@ -91,6 +158,21 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
   const [closedSessions, setClosedSessions] = useState<ClosedCashSession[]>([])
   const [settings, setSettings] = useState<WorkshopSettings>(initialSettings)
   const [activeProfile, setActiveProfile] = useState('Sin sesión')
+
+  function applyWorkshopData(data: WorkshopData) {
+    setAppointments(data.appointments)
+    setClients(data.clients)
+    setInventory(data.inventory)
+    setWorkshopAssets(data.workshopAssets)
+    setWorkshopCategories(data.workshopCategories)
+    setBankAccounts(data.bankAccounts)
+    setBankMovements(data.bankMovements as Record<string, BankMovement[]>)
+    setOrders(data.orders)
+    setSuppliers(data.suppliers)
+    setCashRegister(data.cashRegister)
+    setClosedSessions(data.closedSessions)
+    setSettings(data.settings as WorkshopSettings)
+  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -132,18 +214,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
         const stored = parseWorkshopData(body.data)
         version.current = body.version as number
         lastSavedSnapshot.current = JSON.stringify(stored)
-        setAppointments(stored.appointments)
-        setClients(stored.clients)
-        setInventory(stored.inventory)
-        setWorkshopAssets(stored.workshopAssets)
-        setWorkshopCategories(stored.workshopCategories)
-        setBankAccounts(stored.bankAccounts)
-        setBankMovements(stored.bankMovements as Record<string, BankMovement[]>)
-        setOrders(stored.orders)
-        setSuppliers(stored.suppliers)
-        setCashRegister(stored.cashRegister)
-        setClosedSessions(stored.closedSessions)
-        setSettings(stored.settings as WorkshopSettings)
+        applyWorkshopData(stored)
         setActiveProfile(currentUser.name)
         setLoadError(null)
         setDataLoaded(true)
@@ -191,21 +262,62 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => {
       saveQueue.current = saveQueue.current
         .then(async () => {
-          if (serializedSnapshot === lastSavedSnapshot.current) return
-          const response = await fetch('/api/state', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: `{"data":${serializedSnapshot},"version":${version.current}}`,
-          })
-          if (!response.ok) throw new Error(await responseError(response))
-          const result: unknown = await response.json()
-          if (!isRecord(result) || !Number.isInteger(result.version)) {
-            throw new Error('La API guardó los datos, pero devolvió una versión inválida.')
+          if (serializedSnapshotRef.current === lastSavedSnapshot.current) return
+
+          let pendingSnapshot = serializedSnapshotRef.current
+          let observedLocalSnapshot = pendingSnapshot
+          let baseSnapshot = lastSavedSnapshot.current
+
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            const response = await fetch('/api/state', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: `{"data":${pendingSnapshot},"version":${version.current}}`,
+            })
+
+            if (response.status === 409) {
+              const latestResponse = await fetch('/api/state')
+              if (!latestResponse.ok) throw new Error(await responseError(latestResponse))
+              const latestBody: unknown = await latestResponse.json()
+              if (!isRecord(latestBody) || !Number.isInteger(latestBody.version) || !('data' in latestBody)) {
+                throw new Error('La API devolvió una versión inválida al sincronizar los cambios.')
+              }
+
+              const latestData = parseWorkshopData(latestBody.data)
+              const latestSnapshot = JSON.stringify(latestData)
+              const currentLocalSnapshot = serializedSnapshotRef.current
+              const localWithNewerEdits = mergeConcurrentValue(
+                JSON.parse(observedLocalSnapshot) as unknown,
+                JSON.parse(currentLocalSnapshot) as unknown,
+                JSON.parse(pendingSnapshot) as unknown,
+              )
+              const merged = parseWorkshopData(mergeConcurrentValue(
+                JSON.parse(baseSnapshot) as unknown,
+                localWithNewerEdits,
+                latestData,
+              ))
+
+              observedLocalSnapshot = currentLocalSnapshot
+              pendingSnapshot = JSON.stringify(merged)
+              baseSnapshot = latestSnapshot
+              version.current = latestBody.version as number
+              lastSavedSnapshot.current = latestSnapshot
+              applyWorkshopData(merged)
+              continue
+            }
+
+            if (!response.ok) throw new Error(await responseError(response))
+            const result: unknown = await response.json()
+            if (!isRecord(result) || !Number.isInteger(result.version)) {
+              throw new Error('La API guardó los datos, pero devolvió una versión inválida.')
+            }
+            version.current = result.version as number
+            lastSavedSnapshot.current = pendingSnapshot
+            setStorageError(null)
+            setIsSaving(serializedSnapshotRef.current !== lastSavedSnapshot.current)
+            return
           }
-          version.current = result.version as number
-          lastSavedSnapshot.current = serializedSnapshot
-          setStorageError(null)
-          setIsSaving(serializedSnapshotRef.current !== lastSavedSnapshot.current)
+          throw new Error('Siguen llegando cambios desde otros dispositivos. Tus cambios siguen en esta pestaña; no la recargues e intenta guardar de nuevo.')
         })
         .catch((error: unknown) => {
           console.error('No se pudieron guardar los cambios en Neon:', error)

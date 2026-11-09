@@ -483,7 +483,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       const state = await getOrCreateWorkshopState()
       if (state.version !== payload.version) {
         sendJson(response, 409, {
-          error: 'Los datos cambiaron en otra sesión. Recarga antes de guardar más cambios.',
+          error: 'Hay cambios de otro dispositivo; conserva esta pestaña mientras se sincronizan.',
           version: state.version,
         })
         return
@@ -493,7 +493,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         data: { data: payload.data, version: { increment: 1 } },
       })
       if (result.count !== 1) {
-        sendJson(response, 409, { error: 'Otra sesión guardó cambios. Recarga los datos antes de continuar.' })
+        sendJson(response, 409, { error: 'Hay cambios de otro dispositivo; conserva esta pestaña mientras se sincronizan.' })
         return
       }
       const updated = await prisma.workshopState.findUniqueOrThrow({ where: { id: stateId } })
