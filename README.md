@@ -18,8 +18,7 @@ npm run db:migrate:deploy --prefix backend
 npm run build --prefix backend
 ```
 
-La migración `add_workshop_state` crea la tabla `WorkshopState` usada por la persistencia actual.
-Las fotografías de ingreso se almacenan en la tabla `WorkshopPhoto`; no se incluyen como base64 en cada sincronización del estado.
+Las migraciones crean las tablas `WorkshopState` (persistencia actual), `AuthSession` (sesiones) y `WorkshopPhoto` (fotografías de ingreso). Asegúrate de ejecutar `npm run db:migrate:deploy --prefix backend` al configurar la base y después de cada cambio de esquema; las fotos no se incluyen como base64 en cada sincronización del estado.
 
 ## Desarrollo
 
