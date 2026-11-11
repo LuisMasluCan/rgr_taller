@@ -305,7 +305,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
 
 function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className={`my-auto w-full rounded-2xl bg-slate-900 p-5 shadow-2xl sm:p-6 ${wide ? 'max-w-3xl' : 'max-w-xl'}`}>
       <div className="mb-5 flex items-center justify-between"><h2 className="text-base font-bold text-slate-100">{title}</h2><button aria-label="Cerrar" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-300"><X size={18} /></button></div>
       {children}
