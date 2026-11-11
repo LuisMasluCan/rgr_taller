@@ -6,7 +6,13 @@
       "framework": "vite",
       "installCommand": "npm ci",
       "buildCommand": "npm run build",
-      "outputDirectory": "dist"
+      "outputDirectory": "dist",
+      "rewrites": [
+        {
+          "source": "/(.*)",
+          "destination": "/index.html"
+        }
+      ]
     },
     "backend": {
       "root": "backend",
@@ -31,8 +37,7 @@
     {
       "source": "/(.*)",
       "destination": {
-        "service": "app",
-        "path": "/index.html"
+        "service": "app"
       }
     }
   ]
