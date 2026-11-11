@@ -1,4 +1,4 @@
-import { useEffect, useState, type InputHTMLAttributes } from 'react'
+import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react'
 
 type Props = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> & {
   value: number | string
@@ -7,10 +7,11 @@ type Props = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onC
 
 function NumericInput({ value, onChange, onFocus, ...inputProps }: Props) {
   const [draft, setDraft] = useState(String(value))
+  const isFocused = useRef(false)
   const displayedValue = String(value)
 
   useEffect(() => {
-    if (draft !== '' && draft !== displayedValue) {
+    if (!isFocused.current && draft !== displayedValue) {
       // Sync external changes while preserving an intentionally empty field.
       // oxlint-disable-next-line react/set-state-in-effect
       setDraft(displayedValue)
@@ -23,6 +24,7 @@ function NumericInput({ value, onChange, onFocus, ...inputProps }: Props) {
       type="number"
       value={draft}
       onFocus={(event) => {
+        isFocused.current = true
         onFocus?.(event)
         if (/^0+(?:\.0+)?$/.test(event.currentTarget.value)) {
           setDraft('')
@@ -33,6 +35,11 @@ function NumericInput({ value, onChange, onFocus, ...inputProps }: Props) {
         const nextValue = event.target.value
         setDraft(nextValue)
         onChange(nextValue)
+      }}
+      onBlur={(event) => {
+        inputProps.onBlur?.(event)
+        isFocused.current = false
+        setDraft(displayedValue)
       }}
     />
   )

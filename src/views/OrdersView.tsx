@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Check,
   CircleDollarSign,
+  CircleX,
   Eye,
   FileText,
   KeyRound,
@@ -215,6 +216,7 @@ function OrdersView() {
   const [advanceOrderId, setAdvanceOrderId] = useState<string | null>(null)
   const [approvalReviewOrderId, setApprovalReviewOrderId] = useState<string | null>(null)
   const [revertOrderId, setRevertOrderId] = useState<string | null>(null)
+  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
   const [inventoryOrderId, setInventoryOrderId] = useState<string | null>(null)
   const [diagnosisOrderId, setDiagnosisOrderId] = useState<string | null>(null)
   const [approvalOrderId, setApprovalOrderId] = useState<string | null>(null)
@@ -269,6 +271,7 @@ function OrdersView() {
   const availableQuotations = orders.filter((order) =>
     !editingOrderId &&
     !order.invoiced &&
+    !order.cancellationStatus &&
     !order.convertedToOrderId &&
     order.quoteSaved &&
     Boolean(order.quoteItems?.length) &&
@@ -285,6 +288,7 @@ function OrdersView() {
   const pdfOrder = orders.find((order) => order.id === pdfOrderId) ?? null
   const advanceOrder = orders.find((order) => order.id === advanceOrderId) ?? null
   const revertOrder = orders.find((order) => order.id === revertOrderId) ?? null
+  const cancelOrder = orders.find((order) => order.id === cancelOrderId) ?? null
   const inventoryOrder = orders.find((order) => order.id === inventoryOrderId) ?? null
   const canViewOrderItems = orderStages.findIndex((stage) => stage.name === itemOrder?.status) >=
     orderStages.findIndex((stage) => stage.name === 'Repuestos')
@@ -647,6 +651,20 @@ function OrdersView() {
     setRevertOrderId(null)
   }
 
+  const cancelServiceOrder = (orderId: string) => {
+    const canceledAt = currentTimestamp()
+    setOrders((current) => current.map((order) => order.id === orderId
+      ? { ...order, status: 'Archivados', cancellationStatus: 'Servicio anulado', canceledAt }
+      : order))
+    setWorkflowError(null)
+    setCancelOrderId(null)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('stage', 'Archivados')
+      return next
+    }, { replace: true })
+  }
+
   const addItemToOrder = () => {
     if (!itemOrder || !selectedOrderItem || !canEditOrderItems) return
     const isSparePartOrSupply = selectedOrderItem.type === 'Repuesto' || selectedOrderItem.type === 'Insumo' ||
@@ -801,6 +819,7 @@ function OrdersView() {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-700 pb-3">
                     <span className="text-sm font-extrabold tracking-tight text-white">#{order.id}</span>
                     <span className={`rounded px-2 py-1 text-[10px] font-bold ${order.invoiced ? 'bg-lime-300 text-slate-950' : 'bg-slate-700 text-slate-100'}`}>{order.invoiced ? 'Facturada' : 'No facturada'}</span>
+                    {order.cancellationStatus && <span className="rounded bg-red-950/50 px-2 py-1 text-[10px] font-bold text-red-300">{order.cancellationStatus}</span>}
                     <span className="text-xs font-medium text-slate-300">{order.date}</span>
                   </div>
 
@@ -844,7 +863,8 @@ function OrdersView() {
                   {orderStages.findIndex((stage) => stage.name === order.status) >= orderStages.findIndex((stage) => stage.name === 'Repuestos') && (
                     <ActionButton label={['Control', 'Archivados'].includes(order.status) ? 'Ver ítems y precios de la orden' : 'Ver y agregar ítems y precios'} icon={<NotebookPen size={15} />} onClick={() => openOrderItems(order)} />
                   )}
-                  <ActionButton label="Simular WhatsApp" icon={<Eye size={15} />} onClick={() => { setWhatsAppOrderId(order.id); setWhatsAppSent(false) }} />
+                  <ActionButton label="Simular WhatsApp" icon={<MessageCircle size={15} />} onClick={() => { setWhatsAppOrderId(order.id); setWhatsAppSent(false) }} />
+                  {order.status !== 'Archivados' && <ActionButton label="Anular orden de servicio" icon={<CircleX size={15} />} onClick={() => setCancelOrderId(order.id)} />}
                   <ActionButton label="Avanzar" icon={<ArrowRight size={15} />} disabled={order.status === orderStages[orderStages.length - 1].name} onClick={() => requestAdvance(order)} />
                 </div>
               </div>
@@ -1030,6 +1050,18 @@ function OrdersView() {
           <p className="text-sm text-slate-400">¿Estás seguro de devolver la ODS?</p>
           <div className="mt-6 flex justify-end gap-2">
             <button type="button" onClick={() => confirmRevertStage(revertOrder.id)} className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-lime-400">SÍ, DEVOLVER</button>
+          </div>
+        </Modal>
+      )}
+
+      {cancelOrder && (
+        <Modal title={`Anular orden de servicio #${cancelOrder.id}`} onClose={() => setCancelOrderId(null)}>
+          <p className="text-sm leading-relaxed text-slate-300">
+            ¿Confirmas anular el servicio de {cancelOrder.customer}? La orden pasará a Archivados y quedará registrada como “Servicio anulado”.
+          </p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" onClick={() => setCancelOrderId(null)} className="rounded-lg border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-800">CANCELAR</button>
+            <button type="button" onClick={() => cancelServiceOrder(cancelOrder.id)} className="flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-red-400"><CircleX size={14} /> ANULAR SERVICIO</button>
           </div>
         </Modal>
       )}

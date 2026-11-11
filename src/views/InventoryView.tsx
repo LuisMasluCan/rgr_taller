@@ -90,7 +90,11 @@ function InventoryView() {
     const price = next.type === 'Mano de Obra'
       ? getLaborSuggestedPrice(Number(next.laborHours) || 0, next.complexity)
       : cost * (1 + (Number(next.marginPercent) || 0) / 100)
-    setDraft({ ...next, cost: cost.toFixed(2), price: price.toFixed(2) })
+    setDraft({
+      ...next,
+      cost: next.type === 'Servicio Compuesto' ? cost.toFixed(2) : next.cost,
+      price: price.toFixed(2),
+    })
   }
 
   const openNewItem = () => {

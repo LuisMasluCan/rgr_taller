@@ -119,7 +119,7 @@ function metricsForPeriod(orders: ReturnType<typeof useDemoData>['orders'], star
     row.externalServiceSales = externalItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
     row.externalServiceProfit = externalItems.reduce((sum, item) => sum + (item.price - item.cost) * item.quantity, 0)
     const completedDurations = monthlyOrders
-      .filter((order) => order.status === 'Entrega' || order.status === 'Archivados')
+      .filter((order) => !order.cancellationStatus && (order.status === 'Entrega' || order.status === 'Archivados'))
       .map((order) => orderWorkshopMinutes(order))
       .filter((duration): duration is number => duration !== null)
     row.averageStayHours = completedDurations.length

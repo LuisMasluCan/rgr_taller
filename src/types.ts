@@ -2,6 +2,8 @@ export type Order = {
   id: string
   status: string
   timestamps?: OrderTimestamps
+  cancellationStatus?: 'Servicio anulado'
+  canceledAt?: string
   invoiced: boolean
   date: string
   dateISO?: string

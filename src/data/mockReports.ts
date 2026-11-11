@@ -42,7 +42,7 @@ export function formatDuration(minutes: number | null): string {
 export function orderWorkshopMinutes(order: Order, now = new Date().toISOString()): number | null {
   const timestamps = order.timestamps
   const isDelivered = order.status === 'Entrega' || order.status === 'Archivados'
-  const end = timestamps?.fechaEntrega ?? timestamps?.fechaArchivado ?? (isDelivered ? undefined : now)
+  const end = timestamps?.fechaEntrega ?? timestamps?.fechaArchivado ?? order.canceledAt ?? (isDelivered ? undefined : now)
   return elapsedMinutes(timestamps?.fechaIngreso, end)
 }
 
