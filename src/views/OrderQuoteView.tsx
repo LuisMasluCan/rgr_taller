@@ -15,13 +15,21 @@ import QuotationPDFTemplate from '../components/QuotationPDFTemplate'
 import NumericInput from '../components/NumericInput'
 import { useDemoData } from '../contexts/useDemoData'
 import { laborConfig } from '../data/laborConfig'
-import type { OrderServiceItem, Payment } from '../types'
+import type { CashMovement, OrderServiceItem, Payment } from '../types'
 
 type Props = { mode: 'quote' | 'invoice' }
 type Totals = { subtotal: number; discounts: number; base: number; taxes: number; total: number }
 
 const currency = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 2 })
 const typeOptions: OrderServiceItem['type'][] = ['Mano de obra', 'Repuesto', 'Insumo', 'Servicio Compuesto', 'Adicional']
+const cashPaymentMethodByLabel: Record<string, NonNullable<CashMovement['paymentMethod']>> = {
+  Efectivo: 'Efectivo',
+  Transferencia: 'Transferencia',
+  Yape: 'Yape',
+  Plin: 'Plin',
+  'Tarjeta de crédito': 'Tarjeta de crédito',
+  'Tarjeta de débito': 'Tarjeta de débito',
+}
 
 function calculateTotals(items: OrderServiceItem[], globalDiscount: number, includeApprovedOnly: boolean): Totals {
   const applicableItems = includeApprovedOnly ? items.filter((item) => item.status === 'Aprobado') : items
@@ -58,7 +66,7 @@ function OrderQuoteView({ mode }: Props) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const printOnOpen = searchParams.get('print') === '1'
-  const { orders, setOrders, inventory, bankAccounts, setBankAccounts, setBankMovements, settings, clients, activeProfile } = useDemoData()
+  const { orders, setOrders, inventory, bankAccounts, setBankAccounts, setBankMovements, cashRegister, setCashRegister, settings, clients, activeProfile } = useDemoData()
   const order = orders.find((candidate) => candidate.id === orderId)
   const invoiceAllowed = order?.status === 'Entrega'
   const [items, setItems] = useState<OrderServiceItem[]>(() => order?.quoteItems ?? [])
@@ -69,13 +77,14 @@ function OrderQuoteView({ mode }: Props) {
   const [unitPrice, setUnitPrice] = useState('')
   const [taxRate, setTaxRate] = useState('18')
   const [depositModal, setDepositModal] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState('Caja - Efectivo')
+  const [paymentMethod, setPaymentMethod] = useState('Efectivo')
   const [invoicePaymentAccountId, setInvoicePaymentAccountId] = useState(
     bankAccounts.find((account) => account.name === order?.invoicePaymentMethod)?.id ?? bankAccounts[0]?.id ?? '',
   )
   const [paymentConcept, setPaymentConcept] = useState('Abono a cuenta')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentError, setPaymentError] = useState('')
+  const [paymentWarning, setPaymentWarning] = useState('')
   const [savedNotice, setSavedNotice] = useState('')
   const [invoiceSuccessOpen, setInvoiceSuccessOpen] = useState(false)
   const [invoiceSuccessMessage, setInvoiceSuccessMessage] = useState('')
@@ -192,12 +201,36 @@ function OrderQuoteView({ mode }: Props) {
       setPaymentError(`El abono no puede superar el pendiente de ${currency.format(pendingTotal)}.`)
       return
     }
+    const cashPaymentMethod = cashPaymentMethodByLabel[paymentMethod]
+    if (!cashPaymentMethod) {
+      setPaymentError('Selecciona un medio de pago válido.')
+      return
+    }
+    const timestamp = new Date().toISOString()
     const payment: Payment = {
       id: `payment-${Date.now()}`,
-      date: new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium' }).format(new Date()),
+      date: new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium' }).format(new Date(timestamp)),
+      timestamp,
       method: paymentMethod,
       concept: paymentConcept,
       amount,
+    }
+    if (cashRegister) {
+      const movement: CashMovement = {
+        id: `cash-${payment.id}`,
+        type: 'Ingreso',
+        concept: `${paymentConcept.trim()} · Orden #${order.id}`,
+        amount,
+        timestamp,
+        paymentMethod: cashPaymentMethod,
+        currency: 'PEN',
+        orderId: order.id,
+      }
+      setCashRegister((current) => current ? { ...current, movements: [...current.movements, movement] } : current)
+      setPaymentWarning('')
+      setSavedNotice('Abono registrado y agregado automáticamente a la caja abierta.')
+    } else {
+      setPaymentWarning('Abono guardado fuera de caja y no aparecerá en este reporte de cierre. Concílialo con el medio de pago correspondiente.')
     }
     setOrders((current) => current.map((candidate) => candidate.id === order.id
       ? { ...candidate, quoteItems: items, quoteInitialized: true, quoteDiscountPercent: globalDiscount, payments: [...(candidate.payments ?? []), payment] }
@@ -361,7 +394,7 @@ function OrderQuoteView({ mode }: Props) {
 
       <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
         <section className="rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-lg sm:p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-bold text-slate-100">Abonos / pagos</h3><p className="mt-0.5 text-[11px] text-slate-400">Registra pagos parciales asociados a esta orden.</p></div><button onClick={() => { setPaymentError(''); setPaymentAmount(''); setDepositModal(true) }} className="flex h-9 items-center gap-1.5 rounded-lg bg-lime-300 px-3 text-[10px] font-extrabold text-slate-950 hover:bg-lime-400"><Plus size={14} /> REGISTRAR ABONO</button></div>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-bold text-slate-100">Abonos / pagos</h3><p className="mt-0.5 text-[11px] text-slate-400">Registra pagos parciales asociados a esta orden.</p></div><button onClick={() => { setPaymentError(''); setPaymentWarning(''); setPaymentAmount(''); setDepositModal(true) }} className="flex h-9 items-center gap-1.5 rounded-lg bg-lime-300 px-3 text-[10px] font-extrabold text-slate-950 hover:bg-lime-400"><Plus size={14} /> REGISTRAR ABONO</button></div>
           <div className="overflow-x-auto"><table className="w-full min-w-[460px] text-left"><thead className="bg-slate-800 text-[9px] font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-2.5">Fecha</th><th className="px-3 py-2.5">Método</th><th className="px-3 py-2.5">Concepto</th><th className="px-3 py-2.5 text-right">Valor</th></tr></thead><tbody className="divide-y divide-slate-100">{payments.map((payment) => <tr key={payment.id} className="text-[10px] text-slate-400"><td className="px-3 py-3">{payment.date}</td><td className="px-3 py-3">{payment.method}</td><td className="px-3 py-3">{payment.concept}</td><td className="px-3 py-3 text-right font-semibold">{currency.format(payment.amount)}</td></tr>)}{!payments.length && <tr><td colSpan={4} className="px-3 py-8 text-center text-xs text-slate-400">Todavía no hay abonos registrados.</td></tr>}</tbody></table></div>
           <div className="mt-4 flex items-center justify-between rounded-lg bg-slate-900 px-4 py-3.5 text-white"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">Pendiente por pagar</span><strong className="text-lg">{currency.format(pendingTotal)}</strong></div>
         </section>
@@ -375,6 +408,7 @@ function OrderQuoteView({ mode }: Props) {
       </div>
 
       {savedNotice && <p role="status" className="text-xs font-semibold text-emerald-300">{savedNotice}</p>}
+      {paymentWarning && <p role="alert" className="text-xs font-semibold text-amber-300">{paymentWarning}</p>}
       <footer className="no-print flex flex-col-reverse justify-between gap-3 border-t border-slate-700 pt-5 sm:flex-row sm:items-center">
         <button onClick={() => navigate(isInvoice ? '/orders' : '/quotes')} className="flex h-10 items-center justify-center gap-2 rounded-lg bg-violet-600 px-5 text-xs font-bold text-white hover:bg-violet-700"><X size={15} /> SALIR</button>
         <div className="flex flex-col-reverse gap-2 sm:flex-row">
@@ -402,7 +436,38 @@ function OrderQuoteView({ mode }: Props) {
         </div>
       )}
 
-      {depositModal && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="deposit-title"><form onSubmit={addPayment} className="w-full max-w-md rounded-2xl bg-slate-900 p-5 shadow-2xl"><div className="mb-5 flex items-center justify-between"><h2 id="deposit-title" className="text-base font-bold text-slate-100">Registrar abono</h2><button type="button" aria-label="Cerrar" onClick={() => setDepositModal(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800"><X size={17} /></button></div><div className="space-y-3"><label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Método</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs"><option>Caja - Efectivo</option><option>Transferencia bancaria</option><option>Tarjeta</option><option>Yape / Plin</option></select></label><label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Concepto</span><input required value={paymentConcept} onChange={(event) => setPaymentConcept(event.target.value)} className="h-10 w-full rounded-lg border border-slate-700 px-3 text-xs outline-none focus:border-slate-700" /></label><label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Valor (pendiente {currency.format(pendingTotal)})</span><NumericInput required min="0.01" max={pendingTotal} step="0.01" value={paymentAmount} onChange={setPaymentAmount} className="h-10 w-full rounded-lg border border-slate-700 px-3 text-xs outline-none focus:border-slate-700" /></label>{paymentError && <p role="alert" className="text-xs text-red-300">{paymentError}</p>}</div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setDepositModal(false)} className="rounded-lg border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-400">Cancelar</button><button type="submit" className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950">Guardar abono</button></div></form></div>}
+      {depositModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="deposit-title">
+          <form onSubmit={addPayment} className="w-full max-w-md rounded-2xl bg-slate-900 p-5 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 id="deposit-title" className="text-base font-bold text-slate-100">Registrar abono</h2>
+              <button type="button" aria-label="Cerrar" onClick={() => setDepositModal(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800"><X size={17} /></button>
+            </div>
+            {!cashRegister && <p role="alert" className="mb-3 rounded-lg bg-amber-950/30 px-3 py-2 text-xs text-amber-200">No hay una caja abierta. Este abono se guardará fuera del cierre de caja; para incluir futuros abonos, abre la caja antes de registrarlos.</p>}
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Método</span>
+                <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs">
+                  {Object.keys(cashPaymentMethodByLabel).map((method) => <option key={method} value={method}>{method}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Concepto</span>
+                <input required value={paymentConcept} onChange={(event) => setPaymentConcept(event.target.value)} className="h-10 w-full rounded-lg border border-slate-700 px-3 text-xs outline-none focus:border-slate-700" />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Valor (pendiente {currency.format(pendingTotal)})</span>
+                <NumericInput required min="0.01" max={pendingTotal} step="0.01" value={paymentAmount} onChange={setPaymentAmount} className="h-10 w-full rounded-lg border border-slate-700 px-3 text-xs outline-none focus:border-slate-700" />
+              </label>
+              {paymentError && <p role="alert" className="text-xs text-red-300">{paymentError}</p>}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setDepositModal(false)} className="rounded-lg border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-400">Cancelar</button>
+              <button type="submit" className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950">Guardar abono</button>
+            </div>
+          </form>
+        </div>
+      )}
       {invoiceSuccessOpen && <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="invoice-success-title"><div className="w-full max-w-sm rounded-2xl bg-slate-900 p-7 text-center shadow-2xl"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-lime-900/40 text-lime-300"><Check size={27} strokeWidth={2.5} /></div><h2 id="invoice-success-title" className="mt-4 text-lg font-bold text-slate-100">¡Factura emitida!</h2><p role="status" className="mt-2 text-xs leading-relaxed text-slate-400">{invoiceSuccessMessage}</p><p className="mt-2 text-xs text-slate-400">Orden <strong className="text-slate-300">#{order.id}</strong> archivada correctamente.</p><button onClick={() => navigate('/orders')} className="mt-6 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-900 text-xs font-bold text-white hover:bg-slate-700">Volver a órdenes <Check size={14} /></button></div></div>}
     </div>
   )

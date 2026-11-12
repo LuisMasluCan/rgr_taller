@@ -34,8 +34,74 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+const mojibakeReplacements: [string, string][] = [
+  ['Ã¡', 'á'], ['Ã©', 'é'], ['Ã­', 'í'], ['Ã³', 'ó'], ['Ãº', 'ú'],
+  ['Ã', 'Á'], ['Ã‰', 'É'], ['Ã', 'Í'], ['Ã“', 'Ó'], ['Ãš', 'Ú'],
+  ['Ã±', 'ñ'], ['Ã‘', 'Ñ'], ['Ã¼', 'ü'], ['Ãœ', 'Ü'],
+  ['Â¿', '¿'], ['Â¡', '¡'],
+]
+
+const replacementCharacterWords: [RegExp, string][] = [
+  [/mec[�?]nica/gi, 'Mecánica'],
+  [/suspensi[�?]n/gi, 'Suspensión'],
+  [/bater[�?]as?/gi, 'Batería'],
+  [/direcci[�?]n/gi, 'Dirección'],
+  [/transmisi[�?]n/gi, 'Transmisión'],
+  [/diagn[�?]stico/gi, 'Diagnóstico'],
+  [/revisi[�?]n/gi, 'Revisión'],
+  [/reparaci[�?]n/gi, 'Reparación'],
+  [/informaci[�?]n/gi, 'Información'],
+  [/cotizaci[�?]n/gi, 'Cotización'],
+  [/aprobaci[�?]n/gi, 'Aprobación'],
+  [/inspecci[�?]n/gi, 'Inspección'],
+  [/administraci[�?]n/gi, 'Administración'],
+  [/recepci[�?]n/gi, 'Recepción'],
+  [/atenci[�?]n/gi, 'Atención'],
+  [/garant[�?]a/gi, 'Garantía'],
+  [/veh[�?]culos?/gi, 'Vehículo'],
+  [/a[�?]os?/gi, 'Año'],
+  [/d[�?]as?/gi, 'Día'],
+  [/ma[�?]ana/gi, 'Mañana'],
+  [/espa[�?]ol/gi, 'Español'],
+  [/ni[�?]os?/gi, 'Niño'],
+  [/se[�?]al/gi, 'Señal'],
+  [/dise[�?]o/gi, 'Diseño'],
+  [/peque[�?]os?/gi, 'Pequeño'],
+  [/ba[�?]o/gi, 'Baño'],
+  [/cami[�?]n/gi, 'Camión'],
+]
+
+function repairSpanishText(text: string): string {
+  let repaired = text
+  for (const [broken, correct] of mojibakeReplacements) {
+    repaired = repaired.replaceAll(broken, correct)
+  }
+  for (const [pattern, correct] of replacementCharacterWords) {
+    repaired = repaired.replace(pattern, (match) => {
+      const suffix = match.toLowerCase().endsWith('s') ? 's' : ''
+      const replacement = `${correct}${suffix}`
+      if (match === match.toUpperCase()) return replacement.toUpperCase()
+      if (match[0] === match[0].toUpperCase()) return replacement
+      return replacement.toLowerCase()
+    })
+  }
+  return repaired
+}
+
+function repairSpanishTextInData(value: unknown): unknown {
+  if (typeof value === 'string') return repairSpanishText(value)
+  if (Array.isArray(value)) return value.map(repairSpanishTextInData)
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, repairSpanishTextInData(entry)]),
+    )
+  }
+  return value
+}
+
 function parseWorkshopData(value: unknown): WorkshopData {
-  if (!isRecord(value)) throw new Error('La API devolvió un estado de taller inválido.')
+  const repairedValue = repairSpanishTextInData(value)
+  if (!isRecord(repairedValue)) throw new Error('La API devolvió un estado de taller inválido.')
   const arrayFields = [
     'appointments',
     'clients',
@@ -47,13 +113,13 @@ function parseWorkshopData(value: unknown): WorkshopData {
     'suppliers',
     'closedSessions',
   ] as const
-  if (arrayFields.some((field) => !Array.isArray(value[field]))) {
+  if (arrayFields.some((field) => !Array.isArray(repairedValue[field]))) {
     throw new Error('Faltan colecciones requeridas en los datos recibidos de Neon.')
   }
-  if (!isRecord(value.settings) || !isRecord(value.bankMovements)) {
+  if (!isRecord(repairedValue.settings) || !isRecord(repairedValue.bankMovements)) {
     throw new Error('La configuración o los movimientos bancarios recibidos son inválidos.')
   }
-  return value as unknown as WorkshopData
+  return repairedValue as unknown as WorkshopData
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {

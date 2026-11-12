@@ -102,6 +102,7 @@ export type OrderServiceItem = {
 export type Payment = {
   id: string
   date: string
+  timestamp?: string
   method: string
   concept: string
   amount: number
@@ -204,6 +205,8 @@ export type CashMovement = {
   concept: string
   amount: number
   timestamp: string
+  paymentMethod?: 'Efectivo' | 'Transferencia' | 'Yape' | 'Plin' | 'Tarjeta de crédito' | 'Tarjeta de débito'
+  currency?: 'PEN' | 'USD'
   expenseCategory?: 'Gasto General del Taller' | 'Asociado a Orden de Servicio'
   orderId?: string
 }
@@ -211,6 +214,8 @@ export type CashMovement = {
 export type CashRegister = {
   openedAt: string
   initialAmount: number
+  initialAmountUsd?: number
+  openingObservations?: string
   movements: CashMovement[]
 } | null
 
@@ -225,6 +230,13 @@ export type ClosedCashSession = {
   expectedBalance: number
   actualBalance: number
   difference: number
+  initialAmountUsd?: number
+  totalIncomesUsd?: number
+  totalExpensesUsd?: number
+  expectedBalanceUsd?: number
+  actualBalanceUsd?: number
+  differenceUsd?: number
+  openingObservations?: string
   observations: string
   movements: CashMovement[]
 }
