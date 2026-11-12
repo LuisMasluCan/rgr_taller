@@ -210,6 +210,7 @@ export type CashMovement = {
   currency?: 'PEN' | 'USD'
   expenseCategory?: 'Gasto General del Taller' | 'Asociado a Orden de Servicio'
   orderId?: string
+  contact?: string
 }
 
 export type CashRegister = {

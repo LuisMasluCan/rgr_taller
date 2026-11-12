@@ -243,6 +243,7 @@ function OrderQuoteView({ mode }: Props) {
         paymentMethod: cashPaymentMethod,
         currency: 'PEN',
         orderId: order.id,
+        contact: order.customer,
       }
       setCashRegister((current) => current ? { ...current, movements: [...current.movements, movement] } : current)
       setPaymentWarning('')

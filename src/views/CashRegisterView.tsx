@@ -29,11 +29,6 @@ function formatBothCurrencies(penAmount: number, usdAmount: number) {
   return `${formatAmount(penAmount)} · ${formatAmount(usdAmount, 'USD')}`
 }
 
-function formatDifference(amount: number, cashCurrency: 'PEN' | 'USD' = 'PEN') {
-  if (amount === 0) return formatAmount(0, cashCurrency)
-  return `${amount < 0 ? 'Faltante' : 'Sobrante'} ${formatAmount(Math.abs(amount), cashCurrency)}`
-}
-
 function getPaymentBreakdown(movements: CashMovement[]) {
   return paymentMethods.map((method) => {
     const methodMovements = movements.filter((movement) => (movement.paymentMethod ?? 'Efectivo') === method)
@@ -141,7 +136,10 @@ function CashRegisterView() {
         currency: movementCurrency,
         ...(modal === 'expense' ? {
           expenseCategory,
-          ...(expenseCategory === 'Asociado a Orden de Servicio' ? { orderId: selectedOrderId } : {}),
+          ...(expenseCategory === 'Asociado a Orden de Servicio' ? {
+            orderId: selectedOrderId,
+            contact: activeOrders.find((order) => order.id === selectedOrderId)?.customer,
+          } : {}),
         } : {}),
       }
       setCashRegister((current) => current ? { ...current, movements: [...current.movements, movement] } : current)
@@ -183,91 +181,61 @@ function CashRegisterView() {
   const difference = amount.trim() === '' ? null : Number(amount) - totals.expected
   const differenceUsd = usdAmount.trim() === '' ? null : Number(usdAmount) - totals.expectedUsd
   const closedSessionColumns = [
-    'Fecha y Hora de Cierre',
-    'Usuario que cerró',
-    'Observaciones de apertura',
-    'Monto Inicial (PEN)',
-    'Monto Inicial (USD)',
-    'Total Ingresos (PEN)',
-    'Total Egresos (PEN)',
-    'Saldo Esperado (PEN)',
-    'Saldo Real (PEN)',
-    'Diferencia (PEN)',
-    'Total Ingresos (USD)',
-    'Total Egresos (USD)',
-    'Saldo Esperado (USD)',
-    'Saldo Real (USD)',
-    'Diferencia (USD)',
-    ...paymentMethods.flatMap((method) => [
-      `${method} Ingresos (PEN)`,
-      `${method} Egresos (PEN)`,
-      `${method} Ingresos (USD)`,
-      `${method} Egresos (USD)`,
-    ]),
-  ]
-  const closedSessionRows: ExportCell[][] = closedSessions.map((session) => [
-    formatDateTime(session.closedAt),
-    session.closedBy,
-    session.openingObservations ?? '',
-    formatAmount(session.initialAmount),
-    formatAmount(session.initialAmountUsd ?? 0, 'USD'),
-    formatAmount(session.totalIncomes),
-    formatAmount(session.totalExpenses),
-    formatAmount(session.expectedBalance),
-    formatAmount(session.actualBalance),
-    session.difference === 0
-      ? formatAmount(0)
-      : `${session.difference < 0 ? 'Faltante' : 'Sobrante'} ${formatAmount(Math.abs(session.difference))}`,
-    formatAmount(session.totalIncomesUsd ?? 0, 'USD'),
-    formatAmount(session.totalExpensesUsd ?? 0, 'USD'),
-    formatAmount(session.expectedBalanceUsd ?? 0, 'USD'),
-    formatAmount(session.actualBalanceUsd ?? 0, 'USD'),
-    (session.differenceUsd ?? 0) === 0
-      ? formatAmount(0, 'USD')
-      : `${(session.differenceUsd ?? 0) < 0 ? 'Faltante' : 'Sobrante'} ${formatAmount(Math.abs(session.differenceUsd ?? 0), 'USD')}`,
-    ...getPaymentBreakdown(session.movements).flatMap((breakdown) => [
-      formatAmount(breakdown.incomesPen),
-      formatAmount(breakdown.expensesPen),
-      formatAmount(breakdown.incomesUsd, 'USD'),
-      formatAmount(breakdown.expensesUsd, 'USD'),
-    ]),
-  ])
-  const pdfClosedSessionColumns = [
-    'Fecha y hora de cierre',
-    'Usuario',
-    'Observación de apertura',
+    'Fecha',
+    'Detalle',
+    'OT',
+    'Contacto',
     'Medio de pago',
-    'Ingresos (PEN)',
-    'Egresos (PEN)',
-    'Ingresos (USD)',
-    'Egresos (USD)',
-    'Efectivo esperado (PEN · USD)',
-    'Efectivo real (PEN · USD)',
-    'Diferencia (PEN · USD)',
+    'Débito (PEN)',
+    'Crédito (PEN)',
+    'Débito (USD)',
+    'Crédito (USD)',
   ]
-  const pdfClosedSessionRows: ExportCell[][] = closedSessions.flatMap((session) => {
-    const breakdown = getPaymentBreakdown(session.movements)
-      .filter((entry) => entry.incomesPen || entry.expensesPen || entry.incomesUsd || entry.expensesUsd)
-    const rows = breakdown.length ? breakdown : [{
-      method: 'Sin movimientos',
-      incomesPen: 0,
-      expensesPen: 0,
-      incomesUsd: 0,
-      expensesUsd: 0,
-    }]
-    return rows.map((entry) => [
-      formatDateTime(session.closedAt),
-      session.closedBy,
-      session.openingObservations ?? '',
-      entry.method,
-      formatAmount(entry.incomesPen),
-      formatAmount(entry.expensesPen),
-      formatAmount(entry.incomesUsd, 'USD'),
-      formatAmount(entry.expensesUsd, 'USD'),
-      formatBothCurrencies(session.expectedBalance, session.expectedBalanceUsd ?? 0),
-      formatBothCurrencies(session.actualBalance, session.actualBalanceUsd ?? 0),
-      `${formatDifference(session.difference)} · ${formatDifference(session.differenceUsd ?? 0, 'USD')}`,
-    ])
+  const closedSessionRows: ExportCell[][] = closedSessions.flatMap((session) => {
+    const movementRows: ExportCell[][] = session.movements.map((movement) => {
+      const order = movement.orderId ? orders.find((candidate) => candidate.id === movement.orderId) : undefined
+      const isIncome = movement.type === 'Ingreso'
+      const isPen = (movement.currency ?? 'PEN') === 'PEN'
+      return [
+        formatDateTime(movement.timestamp),
+        movement.concept,
+        movement.orderId ? `#${movement.orderId}` : '',
+        movement.contact ?? order?.customer ?? '',
+        movement.paymentMethod ?? 'Efectivo',
+        isIncome && isPen ? movement.amount : 0,
+        !isIncome && isPen ? movement.amount : 0,
+        isIncome && !isPen ? movement.amount : 0,
+        !isIncome && !isPen ? movement.amount : 0,
+      ]
+    })
+    const summaryRows: ExportCell[][] = [
+      ['', 'Saldo inicial', '', '', '', session.initialAmount, '', session.initialAmountUsd ?? 0, ''],
+      ...getPaymentBreakdown(session.movements)
+        .filter((entry) => entry.incomesPen || entry.expensesPen || entry.incomesUsd || entry.expensesUsd)
+        .map((entry) => [
+          '',
+          `Movimientos · ${entry.method}`,
+          '',
+          '',
+          entry.method,
+          entry.incomesPen,
+          entry.expensesPen,
+          entry.incomesUsd,
+          entry.expensesUsd,
+        ]),
+      ['', 'Efectivo esperado', '', '', '', session.expectedBalance, '', session.expectedBalanceUsd ?? 0, ''],
+      ['', 'Efectivo real contado', '', '', '', session.actualBalance, '', session.actualBalanceUsd ?? 0, ''],
+      ['', 'Diferencia', '', '', '', Math.max(0, session.difference), Math.max(0, -session.difference), Math.max(0, session.differenceUsd ?? 0), Math.max(0, -(session.differenceUsd ?? 0))],
+      ...(session.openingObservations ? [['', `Observaciones de apertura: ${session.openingObservations}`, '', '', '', '', '', '', '']] : []),
+      ...(session.observations ? [['', `Observaciones de cierre: ${session.observations}`, '', '', '', '', '', '', '']] : []),
+      ['', '', '', '', '', '', '', '', ''],
+    ]
+    return [
+      ['', `CIERRE DE CAJA · ${formatDateTime(session.closedAt)} · ${session.closedBy}`, '', '', '', '', '', '', ''],
+      ...movementRows,
+      ...(movementRows.length ? [] : [['', 'Sin movimientos registrados', '', '', '', '', '', '', '']]),
+      ...summaryRows,
+    ]
   })
   const runExport = async (exporter: () => Promise<void>) => {
     setExportError('')
@@ -361,14 +329,14 @@ function CashRegisterView() {
             </div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => void runExport(() => exportToPdf(pdfClosedSessionRows, pdfClosedSessionColumns, 'Historial de Cajas Cerradas'))}
+                onClick={() => void runExport(() => exportToPdf(closedSessionRows, closedSessionColumns, 'Reporte Detallado de Cierre de Caja'))}
                 disabled={!closedSessions.length}
                 className="inline-flex h-9 items-center gap-2 rounded-lg bg-rose-600 px-3.5 text-xs font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileDown size={14} /> Exportar PDF
               </button>
               <button
-                onClick={() => void runExport(() => exportToExcel(closedSessionRows, closedSessionColumns, 'Historial de Cajas Cerradas'))}
+                onClick={() => void runExport(() => exportToExcel(closedSessionRows, closedSessionColumns, 'Reporte Detallado de Cierre de Caja'))}
                 disabled={!closedSessions.length}
                 className="inline-flex h-9 items-center gap-2 rounded-lg bg-emerald-800 px-3.5 text-xs font-bold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -605,8 +573,8 @@ function CashRegisterView() {
               </div>
               <button aria-label="Cerrar detalle" onClick={() => setDetailSession(null)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-300"><X size={17} /></button>
             </div>
-            <div className="max-h-[calc(90vh-70px)] space-y-5 overflow-y-auto p-5">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex max-h-[calc(90vh-70px)] flex-col gap-5 overflow-y-auto p-5">
+              <div className="order-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <SummaryRow label="Monto Inicial (PEN · USD)" amount={formatBothCurrencies(detailSession.initialAmount, detailSession.initialAmountUsd ?? 0)} />
                 <SummaryRow label="Total Ingresos (PEN · USD)" amount={formatBothCurrencies(detailSession.totalIncomes, detailSession.totalIncomesUsd ?? 0)} positive />
                 <SummaryRow label="Total Egresos (PEN · USD)" amount={formatBothCurrencies(detailSession.totalExpenses, detailSession.totalExpensesUsd ?? 0)} negative />
@@ -624,12 +592,12 @@ function CashRegisterView() {
                 />
               </div>
               {detailSession.openingObservations && (
-                <p className="rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de apertura:</strong> {detailSession.openingObservations}</p>
+                <p className="order-3 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de apertura:</strong> {detailSession.openingObservations}</p>
               )}
               {detailSession.observations && (
-                <p className="rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de cierre:</strong> {detailSession.observations}</p>
+                <p className="order-3 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de cierre:</strong> {detailSession.observations}</p>
               )}
-              <div className="overflow-hidden rounded-lg border border-slate-700">
+              <div className="order-4 overflow-hidden rounded-lg border border-slate-700">
                 <div className="border-b border-slate-800 px-4 py-3">
                   <h4 className="text-xs font-bold text-slate-200">Desglose por medio de pago</h4>
                   <p className="mt-1 text-[10px] text-slate-400">Montos separados por moneda. Solo el efectivo afecta el saldo contado de caja.</p>
@@ -656,14 +624,14 @@ function CashRegisterView() {
                   </table>
                 </div>
               </div>
-              <div className="overflow-hidden rounded-lg border border-slate-700">
+              <div className="order-1 overflow-hidden rounded-lg border border-slate-700">
                 <div className="border-b border-slate-800 px-4 py-3">
                   <h4 className="text-xs font-bold text-slate-200">Movimientos de la caja</h4>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] text-left">
+                  <table className="w-full min-w-[900px] text-left">
                     <thead className="bg-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      <tr><th className="px-4 py-3">Hora</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Concepto</th><th className="px-4 py-3">Medio de pago</th><th className="px-4 py-3">Vinculación</th><th className="px-4 py-3 text-right">Monto</th></tr>
+                      <tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Concepto</th><th className="px-4 py-3">OT</th><th className="px-4 py-3">Contacto</th><th className="px-4 py-3">Medio de pago</th><th className="px-4 py-3 text-right">Monto</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {detailSession.movements.map((movement) => (
@@ -671,12 +639,13 @@ function CashRegisterView() {
                           <td className="px-4 py-3 tabular-nums">{formatDateTime(movement.timestamp)}</td>
                           <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${movement.type === 'Ingreso' ? 'bg-lime-950/30 text-lime-300' : 'bg-rose-950/30 text-rose-200'}`}>{movement.type}</span></td>
                           <td className="px-4 py-3">{movement.concept}</td>
-                          <td className="px-4 py-3">{movement.paymentMethod ?? 'Efectivo'}</td>
                           <td className="px-4 py-3">{movement.orderId ? `#${movement.orderId}` : 'Taller'}</td>
+                          <td className="px-4 py-3">{movement.contact ?? orders.find((order) => order.id === movement.orderId)?.customer ?? ''}</td>
+                          <td className="px-4 py-3">{movement.paymentMethod ?? 'Efectivo'}</td>
                           <td className={`px-4 py-3 text-right font-semibold tabular-nums ${movement.type === 'Ingreso' ? 'text-emerald-300' : 'text-rose-300'}`}>{movement.type === 'Ingreso' ? '+' : '-'}{formatAmount(movement.amount, movement.currency ?? 'PEN')}</td>
                         </tr>
                       ))}
-                      {detailSession.movements.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-slate-400">Esta caja no registró movimientos.</td></tr>}
+                      {detailSession.movements.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-slate-400">Esta caja no registró movimientos.</td></tr>}
                     </tbody>
                   </table>
                 </div>

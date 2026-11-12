@@ -813,6 +813,7 @@ function OrdersView() {
         paymentMethod: cashPaymentMethod,
         currency: 'PEN',
         orderId: itemOrder.id,
+        contact: itemOrder.customer,
       }
       setCashRegister((current) => current ? { ...current, movements: [...current.movements, movement] } : current)
       setPaymentWarning('')
