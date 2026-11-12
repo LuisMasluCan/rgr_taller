@@ -32,7 +32,8 @@ import OrderActionsDropdown, { type OrderDocumentKind } from '../components/Orde
 import WorkOrderPDFTemplate from '../components/WorkOrderPDFTemplate'
 import { orderStages } from '../data/orderStages'
 import { elapsedMinutes, formatDuration, orderWorkshopMinutes } from '../data/mockReports'
-import type { Order, OrderPhoto, OrderQualityControl, OrderServiceItem } from '../types'
+import type { CashMovement, Order, OrderPhoto, OrderQualityControl, OrderServiceItem, Payment } from '../types'
+import { calculateOrderTotals } from '../utils/orderTotals'
 
 type OrderDraft = {
   customerId: string
@@ -63,6 +64,8 @@ const todayISO = () => {
   return localDate.toISOString().slice(0, 10)
 }
 const currentTimestamp = () => new Date().toISOString()
+const formatPaymentDate = (timestamp: string) =>
+  new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium' }).format(new Date(timestamp))
 const blankDraft = (): OrderDraft => ({
   customerId: '',
   vehicleId: '',
@@ -79,6 +82,15 @@ const blankDraft = (): OrderDraft => ({
 const maxArrivalPhotos = 10
 const maxPhotoSize = 12 * 1024 * 1024
 const maxOptimizedPhotoSize = 480 * 1024
+const currency = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 2 })
+const cashPaymentMethodByLabel: Record<string, NonNullable<CashMovement['paymentMethod']>> = {
+  Efectivo: 'Efectivo',
+  Transferencia: 'Transferencia',
+  Yape: 'Yape',
+  Plin: 'Plin',
+  'Tarjeta de crédito': 'Tarjeta de crédito',
+  'Tarjeta de débito': 'Tarjeta de débito',
+}
 const qualityResolutions = [
   'Falla resuelta',
   'Motor armado',
@@ -193,7 +205,7 @@ async function savePhoto(photo: OrderPhoto): Promise<OrderPhoto> {
 }
 
 function OrdersView() {
-  const { orders, setOrders, clients, inventory, settings } = useDemoData()
+  const { orders, setOrders, clients, inventory, settings, cashRegister, setCashRegister } = useDemoData()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeStage = orderStages.find((stage) => stage.name === searchParams.get('stage'))?.name ?? 'Entrega'
   const [search, setSearch] = useState('')
@@ -238,6 +250,12 @@ function OrdersView() {
   const [orderItemSearch, setOrderItemSearch] = useState('')
   const [orderItemId, setOrderItemId] = useState('')
   const [orderItemQuantity, setOrderItemQuantity] = useState('1')
+  const [depositModal, setDepositModal] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState('Efectivo')
+  const [paymentConcept, setPaymentConcept] = useState('Abono a cuenta')
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentError, setPaymentError] = useState('')
+  const [paymentWarning, setPaymentWarning] = useState('')
   const [activeOrderItemDescriptionId, setActiveOrderItemDescriptionId] = useState<string | null>(null)
   const [whatsAppSent, setWhatsAppSent] = useState(false)
   const [renderedAt, setRenderedAt] = useState(() => new Date().toISOString())
@@ -284,6 +302,11 @@ function OrdersView() {
   const approvalOrder = orders.find((order) => order.id === approvalOrderId) ?? null
   const qualityOrder = orders.find((order) => order.id === qualityOrderId) ?? null
   const itemOrder = orders.find((order) => order.id === itemOrderId) ?? null
+  const orderPayments = itemOrder?.payments ?? []
+  const approvedOrderTotal = itemOrder
+    ? calculateOrderTotals(itemOrder.quoteItems ?? [], itemOrder.quoteDiscountPercent ?? 0, true).total
+    : 0
+  const pendingOrderTotal = Math.max(0, approvedOrderTotal - orderPayments.reduce((sum, payment) => sum + payment.amount, 0))
   const whatsAppOrder = orders.find((order) => order.id === whatsAppOrderId) ?? null
   const pdfOrder = orders.find((order) => order.id === pdfOrderId) ?? null
   const advanceOrder = orders.find((order) => order.id === advanceOrderId) ?? null
@@ -753,6 +776,57 @@ function OrdersView() {
       : order))
   }
 
+  const addOrderPayment = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!itemOrder) return
+    const amount = Number(paymentAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentError('Ingresa un monto mayor a cero.')
+      return
+    }
+    if (amount > pendingOrderTotal) {
+      setPaymentError(`El abono no puede superar el pendiente de ${currency.format(pendingOrderTotal)}.`)
+      return
+    }
+    const cashPaymentMethod = cashPaymentMethodByLabel[paymentMethod]
+    if (!cashPaymentMethod) {
+      setPaymentError('Selecciona un medio de pago válido.')
+      return
+    }
+
+    const timestamp = currentTimestamp()
+    const payment: Payment = {
+      id: `payment-${timestamp}`,
+      date: formatPaymentDate(timestamp),
+      timestamp,
+      method: paymentMethod,
+      concept: paymentConcept,
+      amount,
+    }
+    if (cashRegister) {
+      const movement: CashMovement = {
+        id: `cash-${payment.id}`,
+        type: 'Ingreso',
+        concept: `${paymentConcept.trim()} · Orden #${itemOrder.id}`,
+        amount,
+        timestamp,
+        paymentMethod: cashPaymentMethod,
+        currency: 'PEN',
+        orderId: itemOrder.id,
+      }
+      setCashRegister((current) => current ? { ...current, movements: [...current.movements, movement] } : current)
+      setPaymentWarning('')
+    } else {
+      setPaymentWarning('Abono guardado fuera de caja y no aparecerá en este reporte de cierre. Concílialo con el medio de pago correspondiente.')
+    }
+    setOrders((current) => current.map((order) => order.id === itemOrder.id
+      ? { ...order, payments: [...(order.payments ?? []), payment] }
+      : order))
+    setPaymentAmount('')
+    setPaymentError('')
+    setDepositModal(false)
+  }
+
   const applyFilters = () => setAppliedSearch(search.trim())
 
   return (
@@ -1147,7 +1221,7 @@ function OrdersView() {
               <h2 id="order-items-title" className="text-sm font-bold text-white">Ítems y precios · Orden #{itemOrder.id}</h2>
               <p className="mt-0.5 text-[10px] text-slate-400">{itemOrder.customer} · {itemOrder.vehicle.plate} · Fase: {itemOrder.status}</p>
             </div>
-            <button type="button" aria-label="Cerrar ítems y precios" onClick={() => { setItemOrderId(null); setApprovalReviewOrderId(null) }} className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"><X size={20} /></button>
+            <button type="button" aria-label="Cerrar ítems y precios" onClick={() => { setItemOrderId(null); setDepositModal(false); setApprovalReviewOrderId(null) }} className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"><X size={20} /></button>
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5 lg:p-7">
           {canEditOrderItems && <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-700 bg-slate-900 p-3">
@@ -1230,11 +1304,44 @@ function OrdersView() {
               }, 0).toFixed(2)}</td><td colSpan={2} /></tr></tfoot>
             </table>
           </div>
+          <section className="mt-5 rounded-xl border border-slate-700 bg-slate-900 p-4 sm:p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div><h3 className="text-sm font-bold text-white">Abonos / pagos</h3><p className="mt-0.5 text-[11px] text-slate-400">Registra pagos parciales asociados a esta orden.</p></div>
+              <button type="button" disabled={pendingOrderTotal <= 0} onClick={() => { setPaymentError(''); setPaymentWarning(''); setPaymentAmount(''); setDepositModal(true) }} className="flex h-9 items-center gap-1.5 rounded-lg bg-lime-300 px-3 text-[10px] font-extrabold text-slate-950 hover:bg-lime-400 disabled:cursor-not-allowed disabled:opacity-50"><Plus size={14} /> REGISTRAR ABONO</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[460px] text-left">
+                <thead className="bg-slate-800 text-[9px] font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-2.5">Fecha</th><th className="px-3 py-2.5">Método</th><th className="px-3 py-2.5">Concepto</th><th className="px-3 py-2.5 text-right">Valor</th></tr></thead>
+                <tbody className="divide-y divide-slate-800">
+                  {orderPayments.map((payment) => <tr key={payment.id} className="text-[10px] text-slate-300"><td className="px-3 py-3">{payment.date}</td><td className="px-3 py-3">{payment.method}</td><td className="px-3 py-3">{payment.concept}</td><td className="px-3 py-3 text-right font-semibold">{currency.format(payment.amount)}</td></tr>)}
+                  {!orderPayments.length && <tr><td colSpan={4} className="px-3 py-8 text-center text-xs text-slate-400">Todavía no hay abonos registrados.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 flex items-center justify-between rounded-lg bg-slate-950 px-4 py-3.5 text-white"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">Pendiente por pagar</span><strong className="text-lg">{currency.format(pendingOrderTotal)}</strong></div>
+            {paymentWarning && <p role="alert" className="mt-3 text-xs font-semibold text-amber-300">{paymentWarning}</p>}
+          </section>
           {approvalReviewOrderId === itemOrder.id && <div className="mt-5 flex justify-end">
             <button type="button" disabled={!itemOrder.quoteItems?.length} onClick={() => { setItemOrderId(null); setApprovalOrderId(itemOrder.id); setApprovalConfirmed(false); setApprovalReviewOrderId(null) }} className="rounded-lg bg-lime-400 px-4 py-2.5 text-xs font-extrabold text-black hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50">CONTINUAR A CONFIRMACIÓN</button>
           </div>}
           </>}
           </main>
+        </div>
+      )}
+
+      {depositModal && itemOrder && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="order-deposit-title">
+          <form onSubmit={addOrderPayment} className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between"><h2 id="order-deposit-title" className="text-base font-bold text-white">Registrar abono</h2><button type="button" aria-label="Cerrar" onClick={() => setDepositModal(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800"><X size={17} /></button></div>
+            {!cashRegister && <p role="alert" className="mb-3 rounded-lg bg-amber-950/30 px-3 py-2 text-xs text-amber-200">No hay una caja abierta. Este abono se guardará fuera del cierre de caja; para incluir futuros abonos, abre la caja antes de registrarlos.</p>}
+            <div className="space-y-3">
+              <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Método</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-xs text-white">{Object.keys(cashPaymentMethodByLabel).map((method) => <option key={method} value={method}>{method}</option>)}</select></label>
+              <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Concepto</span><input required value={paymentConcept} onChange={(event) => setPaymentConcept(event.target.value)} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-xs text-white outline-none focus:border-lime-400" /></label>
+              <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Valor (pendiente {currency.format(pendingOrderTotal)})</span><NumericInput required min="0.01" max={pendingOrderTotal} step="0.01" value={paymentAmount} onChange={setPaymentAmount} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-xs text-white outline-none focus:border-lime-400" /></label>
+              {paymentError && <p role="alert" className="text-xs text-red-300">{paymentError}</p>}
+            </div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setDepositModal(false)} className="rounded-lg border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300">Cancelar</button><button type="submit" className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950">Guardar abono</button></div>
+          </form>
         </div>
       )}
 
