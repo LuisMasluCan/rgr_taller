@@ -186,10 +186,10 @@ function CashRegisterView() {
     'OT',
     'Contacto',
     'Medio de pago',
-    'Débito (PEN)',
-    'Crédito (PEN)',
-    'Débito (USD)',
-    'Crédito (USD)',
+    'Ingreso (PEN)',
+    'Egreso (PEN)',
+    'Ingreso (USD)',
+    'Egreso (USD)',
   ]
   const closedSessionRows: ExportCell[][] = closedSessions.flatMap((session) => {
     const movementRows: ExportCell[][] = session.movements.map((movement) => {
@@ -574,7 +574,11 @@ function CashRegisterView() {
               <button aria-label="Cerrar detalle" onClick={() => setDetailSession(null)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-300"><X size={17} /></button>
             </div>
             <div className="flex max-h-[calc(90vh-70px)] flex-col gap-5 overflow-y-auto p-5">
-              <div className="order-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="order-2 rounded-lg border border-slate-700 bg-slate-800/70 px-4 py-3">
+                <h4 className="text-xs font-bold uppercase tracking-wide text-slate-100">General del cierre</h4>
+                <p className="mt-1 text-[10px] text-slate-400">Saldos, totales y diferencia de caja.</p>
+              </div>
+              <div className="order-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <SummaryRow label="Monto Inicial (PEN · USD)" amount={formatBothCurrencies(detailSession.initialAmount, detailSession.initialAmountUsd ?? 0)} />
                 <SummaryRow label="Total Ingresos (PEN · USD)" amount={formatBothCurrencies(detailSession.totalIncomes, detailSession.totalIncomesUsd ?? 0)} positive />
                 <SummaryRow label="Total Egresos (PEN · USD)" amount={formatBothCurrencies(detailSession.totalExpenses, detailSession.totalExpensesUsd ?? 0)} negative />
@@ -592,15 +596,15 @@ function CashRegisterView() {
                 />
               </div>
               {detailSession.openingObservations && (
-                <p className="order-3 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de apertura:</strong> {detailSession.openingObservations}</p>
+                <p className="order-5 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de apertura:</strong> {detailSession.openingObservations}</p>
               )}
               {detailSession.observations && (
-                <p className="order-3 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de cierre:</strong> {detailSession.observations}</p>
+                <p className="order-5 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de cierre:</strong> {detailSession.observations}</p>
               )}
               <div className="order-4 overflow-hidden rounded-lg border border-slate-700">
                 <div className="border-b border-slate-800 px-4 py-3">
-                  <h4 className="text-xs font-bold text-slate-200">Desglose por medio de pago</h4>
-                  <p className="mt-1 text-[10px] text-slate-400">Montos separados por moneda. Solo el efectivo afecta el saldo contado de caja.</p>
+                  <h4 className="text-xs font-bold text-slate-200">Totales generales por medio de pago</h4>
+                  <p className="mt-1 text-[10px] text-slate-400">Ingresos y egresos agrupados por medio de pago y moneda.</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[640px] text-left">
@@ -626,12 +630,13 @@ function CashRegisterView() {
               </div>
               <div className="order-1 overflow-hidden rounded-lg border border-slate-700">
                 <div className="border-b border-slate-800 px-4 py-3">
-                  <h4 className="text-xs font-bold text-slate-200">Movimientos de la caja</h4>
+                  <h4 className="text-xs font-bold text-slate-200">Movimientos</h4>
+                  <p className="mt-1 text-[10px] text-slate-400">Cada importe aparece en Ingreso o Egreso según el tipo de movimiento.</p>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-left">
+                  <table className="w-full min-w-[1020px] text-left">
                     <thead className="bg-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      <tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Concepto</th><th className="px-4 py-3">OT</th><th className="px-4 py-3">Contacto</th><th className="px-4 py-3">Medio de pago</th><th className="px-4 py-3 text-right">Monto</th></tr>
+                      <tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Concepto</th><th className="px-4 py-3">OT</th><th className="px-4 py-3">Contacto</th><th className="px-4 py-3">Medio de pago</th><th className="px-4 py-3 text-right">Ingreso</th><th className="px-4 py-3 text-right">Egreso</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {detailSession.movements.map((movement) => (
@@ -642,10 +647,11 @@ function CashRegisterView() {
                           <td className="px-4 py-3">{movement.orderId ? `#${movement.orderId}` : 'Taller'}</td>
                           <td className="px-4 py-3">{movement.contact ?? orders.find((order) => order.id === movement.orderId)?.customer ?? ''}</td>
                           <td className="px-4 py-3">{movement.paymentMethod ?? 'Efectivo'}</td>
-                          <td className={`px-4 py-3 text-right font-semibold tabular-nums ${movement.type === 'Ingreso' ? 'text-emerald-300' : 'text-rose-300'}`}>{movement.type === 'Ingreso' ? '+' : '-'}{formatAmount(movement.amount, movement.currency ?? 'PEN')}</td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums text-emerald-300">{movement.type === 'Ingreso' ? formatAmount(movement.amount, movement.currency ?? 'PEN') : '—'}</td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums text-rose-300">{movement.type === 'Egreso' ? formatAmount(movement.amount, movement.currency ?? 'PEN') : '—'}</td>
                         </tr>
                       ))}
-                      {detailSession.movements.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-slate-400">Esta caja no registró movimientos.</td></tr>}
+                      {detailSession.movements.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-xs text-slate-400">Esta caja no registró movimientos.</td></tr>}
                     </tbody>
                   </table>
                 </div>
