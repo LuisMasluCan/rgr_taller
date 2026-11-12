@@ -2,6 +2,7 @@ import { Boxes, Package, Pencil, Plus, Search, Trash2, Wrench, X } from 'lucide-
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import NumericInput from '../components/NumericInput'
 import { useLocation } from 'react-router-dom'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import { getLaborSuggestedPrice, laborConfig, type LaborComplexity } from '../data/laborConfig'
 import type { InventoryItem } from '../types'
@@ -63,6 +64,8 @@ function InventoryView() {
       ? 'categories'
       : 'items'
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<InventoryDraft>(emptyDraft)
@@ -166,6 +169,7 @@ function InventoryView() {
     setInventory((current) => editingId
       ? current.map((existing) => existing.id === editingId ? item : existing)
       : [item, ...current])
+    if (!editingId) setPage(1)
     setModalOpen(false)
   }
 
@@ -182,6 +186,9 @@ function InventoryView() {
     )
   }
 
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const visibleItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize)
   const visibleCount = filteredItems.length
 
   return (
@@ -206,13 +213,16 @@ function InventoryView() {
       <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-lg">
         <div className="flex flex-col justify-between gap-3 border-b border-slate-800 p-4 sm:flex-row sm:items-center sm:px-5">
           <div><h2 className="text-sm font-bold text-slate-100">Ítem de venta</h2><p className="mt-0.5 text-[11px] text-slate-400">Repuestos, insumos y servicios que pueden agregarse a órdenes y facturas.</p></div>
-          <label className="relative w-full sm:max-w-[280px]"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" placeholder="Buscar descripción o referencia..." className="h-10 w-full rounded-lg border border-slate-700 pl-9 pr-3 text-xs outline-none focus:border-slate-700" /></label>
+          <div className="flex flex-wrap items-center gap-3">
+            <PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            <label className="relative w-full sm:max-w-[280px]"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} type="search" placeholder="Buscar descripción o referencia..." className="h-10 w-full rounded-lg border border-slate-700 pl-9 pr-3 text-xs outline-none focus:border-slate-700" /></label>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[880px] text-left">
             <thead className="bg-slate-900 text-[9px] font-bold uppercase tracking-wider text-white"><tr><th className="px-5 py-3.5">Ítem</th><th className="px-4 py-3.5">Tipo</th><th className="px-4 py-3.5">Código</th><th className="px-4 py-3.5">Costo</th><th className="px-4 py-3.5">Precio venta</th><th className="px-4 py-3.5">Impuesto</th><th className="px-4 py-3.5">Stock</th><th className="px-4 py-3.5 text-right">Opciones</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredItems.map((item) => {
+              {visibleItems.map((item) => {
                 const itemType = item.type ?? (item.id.startsWith('SRV') ? 'Mano de Obra' : item.id.startsWith('INS') ? 'Insumo' : 'Repuesto')
                 const service = itemType === 'Mano de Obra' || itemType === 'Servicio Compuesto'
                 return (
@@ -229,7 +239,7 @@ function InventoryView() {
             </tbody>
           </table>
         </div>
-        <div className="border-t border-slate-800 px-5 py-3 text-[11px] text-slate-400">Mostrando {visibleCount} de {inventory.length} ítems</div>
+        <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={filteredItems.length} recordLabel="ítems" onPageChange={setPage} />
       </section>
 
       {modalOpen && (

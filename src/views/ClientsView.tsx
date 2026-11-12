@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import NumericInput from '../components/NumericInput'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import type { Client, Vehicle } from '../types'
 
@@ -24,6 +25,8 @@ const emptyVehicle: VehicleDraft = { make: '', model: '', year: currentYear, pla
 function ClientsView() {
   const { clients, setClients } = useDemoData()
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [clientModalOpen, setClientModalOpen] = useState(false)
   const [clientDraft, setClientDraft] = useState<ClientDraft>(emptyClient)
   const [editingClientId, setEditingClientId] = useState<string | null>(null)
@@ -32,13 +35,16 @@ function ClientsView() {
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null)
   const [vehicleModalOpen, setVehicleModalOpen] = useState(false)
 
-  const visibleClients = useMemo(
+  const filteredClients = useMemo(
     () =>
       clients.filter((client) =>
         `${client.id} ${client.name} ${client.email} ${client.phone}`.toLowerCase().includes(search.toLowerCase()),
       ),
     [clients, search],
   )
+  const pageCount = Math.max(1, Math.ceil(filteredClients.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const visibleClients = filteredClients.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   const selectedClient = clients.find((client) => client.id === vehiclesClientId) ?? null
 
@@ -187,10 +193,13 @@ function ClientsView() {
       <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-lg">
         <div className="flex flex-col justify-between gap-3 border-b border-slate-800 p-4 sm:flex-row sm:items-center sm:px-5">
           <div><h2 className="text-sm font-bold text-slate-100">Directorio de clientes</h2><p className="mt-0.5 text-[11px] text-slate-400">Consulta datos de contacto y vehículos asociados.</p></div>
-          <label className="relative w-full sm:max-w-[280px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" placeholder="Buscar cliente, documento..." className="h-10 w-full rounded-lg border border-slate-700 pl-9 pr-3 text-xs outline-none focus:border-slate-700" />
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            <label className="relative w-full sm:max-w-[280px]">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} type="search" placeholder="Buscar cliente, documento..." className="h-10 w-full rounded-lg border border-slate-700 pl-9 pr-3 text-xs outline-none focus:border-slate-700" />
+            </label>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left">
@@ -229,7 +238,7 @@ function ClientsView() {
             </tbody>
           </table>
         </div>
-        <div className="border-t border-slate-800 px-5 py-3 text-[11px] text-slate-400">Mostrando {visibleClients.length} de {clients.length} clientes</div>
+        <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={filteredClients.length} recordLabel="clientes" onPageChange={setPage} />
       </section>
 
       {clientModalOpen && (

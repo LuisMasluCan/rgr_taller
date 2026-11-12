@@ -1,6 +1,7 @@
 import { AlignLeft, HelpCircle, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import ActionConfirmModal, { type ActionConfirmation } from '../components/ActionConfirmModal'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import { categoriesBySpecialty, categorySpecialties } from '../data/mockCategories'
 import type { WorkshopCategory } from '../types'
@@ -18,6 +19,8 @@ const textClass = 'h-11 w-full rounded-lg border border-slate-700 bg-slate-950 p
 
 function CategoriesView() {
   const { workshopCategories, setWorkshopCategories } = useDemoData()
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<CategoryDraft>(emptyDraft)
@@ -28,6 +31,9 @@ function CategoriesView() {
 
   const availableCategories = draft.specialty ? categoriesBySpecialty[draft.specialty] ?? [] : []
   const selectedCategory = isCustomCategory ? '__new__' : draft.category
+  const pageCount = Math.max(1, Math.ceil(workshopCategories.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const visibleCategories = workshopCategories.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   const openNewCategory = () => {
     setEditingId(null)
@@ -75,6 +81,7 @@ function CategoriesView() {
     setWorkshopCategories((current) => editingId
       ? current.map((category) => category.id === editingId ? savedCategory : category)
       : [savedCategory, ...current])
+    if (!editingId) setPage(1)
     setModalOpen(false)
   }
 
@@ -103,6 +110,7 @@ function CategoriesView() {
         <div className="border-b border-slate-800 px-5 py-4">
           <h2 className="text-sm font-bold text-slate-100">Categorías registradas</h2>
           <p className="mt-1 text-[11px] text-slate-400">{workshopCategories.length} categorías configuradas</p>
+          <div className="mt-3"><PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left">
@@ -115,7 +123,7 @@ function CategoriesView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {workshopCategories.map((entry) => (
+              {visibleCategories.map((entry) => (
                 <tr key={entry.id} className="text-xs text-slate-400 transition hover:bg-slate-800/40">
                   <td className="px-5 py-4 font-medium text-slate-300">{entry.specialty}</td>
                   <td className="px-4 py-4 font-semibold text-slate-100">{entry.category}</td>
@@ -132,7 +140,7 @@ function CategoriesView() {
             </tbody>
           </table>
         </div>
-        <div className="border-t border-slate-800 px-5 py-3 text-[11px] text-slate-500">Mostrando {workshopCategories.length} registros</div>
+        <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={workshopCategories.length} recordLabel="categorías" onPageChange={setPage} />
       </section>
 
       {modalOpen && (

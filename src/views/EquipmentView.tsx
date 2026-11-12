@@ -2,6 +2,7 @@ import { ClipboardList, DollarSign, FileText, List, Pencil, Plus, Search, Trash2
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import ActionConfirmModal, { type ActionConfirmation } from '../components/ActionConfirmModal'
 import NumericInput from '../components/NumericInput'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import type { WorkshopAsset } from '../types'
 
@@ -28,6 +29,8 @@ const currency = new Intl.NumberFormat('es-PE', {
 function EquipmentView() {
   const { workshopAssets, setWorkshopAssets } = useDemoData()
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<AssetDraft>(emptyDraft)
@@ -41,6 +44,9 @@ function EquipmentView() {
       `${asset.name} ${asset.reference} ${asset.description} ${asset.observations}`.toLocaleLowerCase('es-PE').includes(query),
     )
   }, [search, workshopAssets])
+  const pageCount = Math.max(1, Math.ceil(filteredAssets.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const visibleAssets = filteredAssets.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   const investedCapital = workshopAssets.reduce((total, asset) => total + asset.value * asset.quantity, 0)
 
@@ -87,6 +93,7 @@ function EquipmentView() {
     setWorkshopAssets((current) => editingId
       ? current.map((existing) => existing.id === editingId ? asset : existing)
       : [asset, ...current])
+    if (!editingId) setPage(1)
     setModalOpen(false)
   }
 
@@ -133,10 +140,13 @@ function EquipmentView() {
             <h2 className="text-sm font-bold text-slate-100">Herramientas registradas</h2>
             <p className="mt-1 text-[11px] text-slate-400">{workshopAssets.length} activos fijos · No se incluyen en el inventario de venta</p>
           </div>
-          <label className="relative block w-full sm:max-w-[300px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} type="search" placeholder="Buscar nombre o referencia..." className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 pl-9 pr-3 text-xs text-slate-200 outline-none placeholder:text-slate-500 focus:border-lime-400" />
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            <label className="relative block w-full sm:max-w-[300px]">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} type="search" placeholder="Buscar nombre o referencia..." className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 pl-9 pr-3 text-xs text-slate-200 outline-none placeholder:text-slate-500 focus:border-lime-400" />
+            </label>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left">
@@ -152,7 +162,7 @@ function EquipmentView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {filteredAssets.map((asset) => (
+              {visibleAssets.map((asset) => (
                 <tr key={asset.id} className="text-xs text-slate-400 transition hover:bg-slate-800/40">
                   <td className="px-5 py-4 font-semibold text-slate-100">{asset.name}</td>
                   <td className="px-4 py-4 font-mono text-[10px] text-lime-200">{asset.reference || '—'}</td>
@@ -174,7 +184,7 @@ function EquipmentView() {
             </tbody>
           </table>
         </div>
-        <div className="border-t border-slate-800 px-5 py-3 text-[11px] text-slate-500">Mostrando {filteredAssets.length} de {workshopAssets.length} registros</div>
+        <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={filteredAssets.length} recordLabel="registros" onPageChange={setPage} />
       </section>
 
       {modalOpen && (

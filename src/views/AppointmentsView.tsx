@@ -1,7 +1,8 @@
 import { CalendarDays, CarFront, Clock3, Pencil, Plus, Trash2, UserRound, X } from 'lucide-react'
-import { useId, useRef, useState, type FormEvent } from 'react'
+import { useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ActionConfirmModal, { type ActionConfirmation } from '../components/ActionConfirmModal'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import type { Appointment, Order } from '../types'
 
@@ -32,6 +33,8 @@ function formatAppointmentDate(date: string) {
 function AppointmentsView() {
   const { appointments, setAppointments, clients, orders, setOrders } = useDemoData()
   const navigate = useNavigate()
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null)
   const [draft, setDraft] = useState<AppointmentDraft>(blankDraft())
@@ -44,6 +47,13 @@ function AppointmentsView() {
 
   const selectedClient = clients.find((client) => client.id === draft.customerId)
   const availableVehicles = selectedClient?.vehicles ?? []
+  const sortedAppointments = useMemo(
+    () => appointments.slice().sort((left, right) => `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`)),
+    [appointments],
+  )
+  const pageCount = Math.max(1, Math.ceil(sortedAppointments.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const visibleAppointments = sortedAppointments.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   const openNewAppointment = () => {
     setEditingAppointmentId(null)
@@ -86,6 +96,7 @@ function AppointmentsView() {
     setAppointments((current) => editingAppointmentId
       ? current.map((entry) => entry.id === editingAppointmentId ? appointment : entry)
       : [...current, appointment])
+    if (!editingAppointmentId) setPage(1)
     setModalOpen(false)
     setError('')
   }
@@ -191,6 +202,7 @@ function AppointmentsView() {
         <div className="border-b border-slate-800 px-5 py-4">
           <h2 className="text-sm font-bold text-slate-100">Citas del taller</h2>
           <p className="mt-1 text-[11px] text-slate-400">Al registrar la llegada, se crea automáticamente una orden en la etapa Recepción.</p>
+          <div className="mt-3"><PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left">
@@ -206,10 +218,7 @@ function AppointmentsView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {appointments.length ? appointments
-                .slice()
-                .sort((left, right) => `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`))
-                .map((appointment) => {
+              {visibleAppointments.length ? visibleAppointments.map((appointment) => {
                   const client = clients.find((entry) => entry.id === appointment.customerId)
                   const vehicle = client?.vehicles.find((entry) => entry.id === appointment.vehicleId)
                   const statusStyle = appointment.status === 'Programada'
@@ -252,6 +261,7 @@ function AppointmentsView() {
             </tbody>
           </table>
         </div>
+        <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={sortedAppointments.length} recordLabel="citas" onPageChange={setPage} />
       </section>
 
       {modalOpen && (

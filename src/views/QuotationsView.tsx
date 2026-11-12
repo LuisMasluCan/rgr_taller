@@ -3,6 +3,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ActionConfirmModal, { type ActionConfirmation } from '../components/ActionConfirmModal'
 import NumericInput from '../components/NumericInput'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import { calculateOrderTotals } from '../utils/orderTotals'
 import type { Order } from '../types'
@@ -14,8 +15,6 @@ const todayISO = () => {
 }
 const currentTimestamp = () => new Date().toISOString()
 const currency = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', maximumFractionDigits: 2 })
-const pageSizeOptions = [10, 25, 50]
-
 function createOrderId(dateISO: string, orders: Order[]) {
   const datePart = dateISO.replaceAll('-', '')
   let suffix = String(Date.now() % 10000).padStart(4, '0')
@@ -64,7 +63,8 @@ function QuotationsView() {
     [orders, search],
   )
   const pageCount = Math.max(1, Math.ceil(savedQuotes.length / pageSize))
-  const visibleQuotes = savedQuotes.slice((page - 1) * pageSize, page * pageSize)
+  const currentPage = Math.min(page, pageCount)
+  const visibleQuotes = savedQuotes.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   const openCreateQuotation = () => {
     setClientId('')
@@ -147,13 +147,7 @@ function QuotationsView() {
       </div>
 
       <section className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <label className="flex items-center gap-2 text-xs font-semibold text-white">
-              Mostrar
-              <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }} className="h-8 rounded-md border border-slate-700 bg-[#0B1120] px-2 text-xs text-white">
-                {pageSizeOptions.map((size) => <option key={size} value={size}>{size}</option>)}
-              </select>
-              registros
-            </label>
+            <PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
             <label className="flex items-center gap-2 text-xs font-semibold text-white">
               Buscar:
               <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} className="h-9 w-full rounded-md border border-slate-700 bg-[#0B1120] px-3 text-xs text-white outline-none focus:border-lime-400 sm:w-48" />
@@ -210,16 +204,7 @@ function QuotationsView() {
               </td></tr></tfoot>}
             </table>
           </section>
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white">
-            <span>Mostrando {savedQuotes.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, savedQuotes.length)} de {savedQuotes.length} cotizaciones</span>
-            <div className="flex items-center gap-1">
-              <button type="button" disabled={page === 1} onClick={() => setPage(1)} className="rounded px-2 py-1.5 text-slate-300 hover:bg-slate-800 disabled:text-slate-600">Primero</button>
-              <button type="button" disabled={page === 1} onClick={() => setPage((current) => current - 1)} className="rounded px-2 py-1.5 text-slate-300 hover:bg-slate-800 disabled:text-slate-600">Anterior</button>
-              <span className="rounded bg-lime-400 px-3 py-1.5 font-bold text-black">{page}</span>
-              <button type="button" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)} className="rounded px-2 py-1.5 text-slate-300 hover:bg-slate-800 disabled:text-slate-600">Siguiente</button>
-              <button type="button" disabled={page >= pageCount} onClick={() => setPage(pageCount)} className="rounded px-2 py-1.5 text-slate-300 hover:bg-slate-800 disabled:text-slate-600">Último</button>
-            </div>
-          </div>
+          <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={savedQuotes.length} recordLabel="cotizaciones" onPageChange={setPage} />
       {createOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="create-quote-title">
         <form onSubmit={createQuotation} className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl sm:p-6">
           <div className="mb-5 flex items-center justify-between"><h2 id="create-quote-title" className="text-base font-bold text-white">Crear cotización</h2><button type="button" aria-label="Cerrar" onClick={() => setCreateOpen(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800"><X size={18} /></button></div>

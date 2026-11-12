@@ -1,6 +1,7 @@
 import { Building2, Eye, Pencil, Plus, Search, Trash2, UserRound, X } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import ActionConfirmModal, { type ActionConfirmation } from '../components/ActionConfirmModal'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import type { Supplier } from '../types'
 
@@ -16,13 +17,12 @@ const blankDraft = (type: Supplier['type'] = 'Empresa'): SupplierDraft => ({
   address: '',
   observations: '',
 })
-const pageSize = 5
-
 function SuppliersView() {
   const { suppliers, setSuppliers } = useDemoData()
   const [type, setType] = useState<Supplier['type']>('Empresa')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [modal, setModal] = useState<ModalState>(null)
   const [draft, setDraft] = useState<SupplierDraft>(blankDraft())
   const [confirmation, setConfirmation] = useState<ActionConfirmation | null>(null)
@@ -100,16 +100,19 @@ function SuppliersView() {
               </button>
             ))}
           </div>
-          <label className="relative w-full sm:w-72">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(event) => { setSearch(event.target.value); setPage(1) }}
-              placeholder="Buscar proveedor..."
-              aria-label="Buscar proveedor"
-              className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 pl-9 pr-3 text-xs text-slate-300 outline-none transition placeholder:text-slate-400 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/30"
-            />
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+            <label className="relative w-full sm:w-72">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={search}
+                onChange={(event) => { setSearch(event.target.value); setPage(1) }}
+                placeholder="Buscar proveedor..."
+                aria-label="Buscar proveedor"
+                className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 pl-9 pr-3 text-xs text-slate-300 outline-none transition placeholder:text-slate-400 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/30"
+              />
+            </label>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -148,14 +151,7 @@ function SuppliersView() {
           </table>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 px-5 py-3 text-[11px] text-slate-400">
-          <span>{filteredSuppliers.length === 0 ? 'Sin resultados' : `Mostrando ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, filteredSuppliers.length)} de ${filteredSuppliers.length} proveedores`}</span>
-          <div className="flex items-center gap-2">
-            <button disabled={currentPage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-md border border-slate-700 px-3 py-1.5 font-semibold text-slate-400 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">Anterior</button>
-            <span className="min-w-16 text-center">Página {currentPage} de {pageCount}</span>
-            <button disabled={currentPage >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} className="rounded-md border border-slate-700 px-3 py-1.5 font-semibold text-slate-400 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">Siguiente</button>
-          </div>
-        </div>
+        <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={filteredSuppliers.length} recordLabel="proveedores" onPageChange={setPage} />
       </section>
 
       {modal && (
