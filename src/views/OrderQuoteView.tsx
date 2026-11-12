@@ -15,7 +15,7 @@ import QuotationPDFTemplate from '../components/QuotationPDFTemplate'
 import NumericInput from '../components/NumericInput'
 import { useDemoData } from '../contexts/useDemoData'
 import { laborConfig } from '../data/laborConfig'
-import type { CashMovement, OrderServiceItem, Payment } from '../types'
+import type { CashMovement, InventoryItem, OrderServiceItem, Payment } from '../types'
 
 type Props = { mode: 'quote' | 'invoice' }
 type Totals = { subtotal: number; discounts: number; base: number; taxes: number; total: number }
@@ -47,6 +47,24 @@ function calculateTotals(items: OrderServiceItem[], globalDiscount: number, incl
   return { subtotal, discounts, base, taxes, total: base + taxes }
 }
 
+function deductInvoicedInventory(inventory: InventoryItem[], items: OrderServiceItem[]) {
+  const quantitiesByReference = new Map<string, number>()
+  for (const item of items) {
+    if (item.status !== 'Aprobado' || (item.type !== 'Repuesto' && item.type !== 'Insumo')) continue
+    const reference = item.reference.trim().toUpperCase()
+    const quantity = Math.max(0, Number(item.quantity) || 0)
+    if (!reference || !quantity) continue
+    quantitiesByReference.set(reference, (quantitiesByReference.get(reference) ?? 0) + quantity)
+  }
+
+  return inventory.map((item) => {
+    const type = item.type ?? (item.id.startsWith('INS') ? 'Insumo' : item.id.startsWith('SRV') ? 'Mano de Obra' : 'Repuesto')
+    if (type !== 'Repuesto' && type !== 'Insumo') return item
+    const quantity = quantitiesByReference.get(item.reference.trim().toUpperCase())
+    return quantity ? { ...item, stock: item.stock - quantity } : item
+  })
+}
+
 function createInvoiceMovement(orderId: string, amount: number) {
   const issuedAt = new Date()
   return {
@@ -66,7 +84,7 @@ function OrderQuoteView({ mode }: Props) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const printOnOpen = searchParams.get('print') === '1'
-  const { orders, setOrders, inventory, bankAccounts, setBankAccounts, setBankMovements, cashRegister, setCashRegister, settings, clients, activeProfile } = useDemoData()
+  const { orders, setOrders, inventory, setInventory, bankAccounts, setBankAccounts, setBankMovements, cashRegister, setCashRegister, settings, clients, activeProfile } = useDemoData()
   const order = orders.find((candidate) => candidate.id === orderId)
   const invoiceAllowed = order?.status === 'Entrega'
   const [items, setItems] = useState<OrderServiceItem[]>(() => order?.quoteItems ?? [])
@@ -249,6 +267,7 @@ function OrderQuoteView({ mode }: Props) {
     }
     invoiceIssuanceStarted.current = true
     const { issuedAt, movement: invoiceMovement } = createInvoiceMovement(order.id, approvedTotals.total)
+    setInventory((current) => deductInvoicedInventory(current, items))
     setOrders((current) => current.map((candidate) => candidate.id === order.id
       ? {
           ...candidate,
