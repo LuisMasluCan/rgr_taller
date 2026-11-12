@@ -14,6 +14,7 @@ const blankDraft = (type: Supplier['type'] = 'Empresa'): SupplierDraft => ({
   email: '',
   phone: '',
   address: '',
+  observations: '',
 })
 const pageSize = 5
 
@@ -28,7 +29,7 @@ function SuppliersView() {
 
   const filteredSuppliers = useMemo(() => suppliers.filter((supplier) =>
     supplier.type === type &&
-    `${supplier.name} ${supplier.identification} ${supplier.email} ${supplier.phone} ${supplier.address}`
+    `${supplier.name} ${supplier.identification} ${supplier.email} ${supplier.phone} ${supplier.address} ${supplier.observations ?? ''}`
       .toLocaleLowerCase('es-PE')
       .includes(search.trim().toLocaleLowerCase('es-PE')),
   ), [suppliers, type, search])
@@ -158,7 +159,7 @@ function SuppliersView() {
       </section>
 
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(null) }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
           <section role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title" className="w-full max-w-lg rounded-xl bg-slate-900 shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
               <div className="flex items-center gap-2">
@@ -186,6 +187,18 @@ function SuppliersView() {
                 <div className="sm:col-span-2">
                   <FormField label="Dirección">
                     <input required value={draft.address} readOnly={modal.mode === 'view'} onChange={(event) => setDraft({ ...draft, address: event.target.value })} placeholder="Dirección fiscal" className={inputClass} />
+                  </FormField>
+                </div>
+                <div className="sm:col-span-2">
+                  <FormField label="Observaciones">
+                    <textarea
+                      rows={3}
+                      value={draft.observations ?? ''}
+                      readOnly={modal.mode === 'view'}
+                      onChange={(event) => setDraft({ ...draft, observations: event.target.value })}
+                      placeholder="Notas, condiciones de pago, horarios u otra información del proveedor"
+                      className={`${inputClass} h-auto resize-y py-2.5`}
+                    />
                   </FormField>
                 </div>
               </div>

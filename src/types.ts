@@ -197,6 +197,7 @@ export type Supplier = {
   email: string
   phone: string
   address: string
+  observations?: string
 }
 
 export type CashMovement = {
