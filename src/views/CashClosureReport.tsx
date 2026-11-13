@@ -172,8 +172,8 @@ function BalanceCard({ label, amount, usdAmount }: { label: string; amount: numb
   return (
     <section className="cash-report-card rounded-lg border border-slate-700 bg-slate-900 p-3">
       <p className="cash-report-muted text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="cash-report-value mt-2 text-lg font-extrabold tabular-nums">{formatAmount(amount)}</p>
-      <p className="cash-report-muted mt-1 text-[10px]">USD: {formatAmount(usdAmount, 'USD')}</p>
+      <p className="cash-report-value mt-2 text-lg font-extrabold tabular-nums text-slate-100">{formatAmount(amount)}</p>
+      <p className="cash-report-muted mt-1 text-[10px] text-slate-300">USD: {formatAmount(usdAmount, 'USD')}</p>
     </section>
   )
 }
