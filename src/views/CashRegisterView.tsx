@@ -3,8 +3,8 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useDemoData } from '../contexts/useDemoData'
 import NumericInput from '../components/NumericInput'
 import type { CashMovement, ClosedCashSession } from '../types'
-import { mockCashClosure } from '../data/mockCashClosure'
 import CashClosureReport from './CashClosureReport'
+import { getCashMovementOrderId } from '../utils/cashMovementOrder'
 import { exportToExcel, type ExportCell } from '../utils/exportUtils'
 
 type ModalMode = 'open' | 'income' | 'expense' | 'close' | null
@@ -56,6 +56,7 @@ function CashRegisterView() {
   const [concept, setConcept] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<NonNullable<CashMovement['paymentMethod']>>('Efectivo')
   const [movementCurrency, setMovementCurrency] = useState<'PEN' | 'USD'>('PEN')
+  const [incomeLinkedToOrder, setIncomeLinkedToOrder] = useState(false)
   const [expenseCategory, setExpenseCategory] = useState<CashMovement['expenseCategory']>('Gasto General del Taller')
   const [selectedOrderId, setSelectedOrderId] = useState('')
   const [observations, setObservations] = useState('')
@@ -87,6 +88,7 @@ function CashRegisterView() {
     () => orders.filter((order) => !order.convertedToOrderId && order.status !== 'Archivados'),
     [orders],
   )
+  const linkableOrders = useMemo(() => orders.filter((order) => !order.convertedToOrderId), [orders])
 
   const openModal = (mode: Exclude<ModalMode, null>) => {
     setAmount('')
@@ -94,6 +96,7 @@ function CashRegisterView() {
     setConcept('')
     setPaymentMethod('Efectivo')
     setMovementCurrency('PEN')
+    setIncomeLinkedToOrder(false)
     setExpenseCategory('Gasto General del Taller')
     setSelectedOrderId('')
     setObservations('')
@@ -115,6 +118,11 @@ function CashRegisterView() {
     if (modal === 'expense' && expenseCategory === 'Asociado a Orden de Servicio' &&
         !activeOrders.some((order) => order.id === selectedOrderId)) {
       setError('Selecciona una orden de servicio activa.')
+      return
+    }
+    if (modal === 'income' && incomeLinkedToOrder &&
+        !linkableOrders.some((order) => order.id === selectedOrderId)) {
+      setError('Selecciona una orden de servicio válida.')
       return
     }
 
@@ -142,6 +150,10 @@ function CashRegisterView() {
             orderId: selectedOrderId,
             contact: activeOrders.find((order) => order.id === selectedOrderId)?.customer,
           } : {}),
+        } : {}),
+        ...(modal === 'income' && incomeLinkedToOrder ? {
+          orderId: selectedOrderId,
+          contact: linkableOrders.find((order) => order.id === selectedOrderId)?.customer,
         } : {}),
       }
       setCashRegister((current) => current ? { ...current, movements: [...current.movements, movement] } : current)
@@ -195,13 +207,14 @@ function CashRegisterView() {
   ]
   const closedSessionRows: ExportCell[][] = closedSessions.flatMap((session) => {
     const movementRows: ExportCell[][] = session.movements.map((movement) => {
-      const order = movement.orderId ? orders.find((candidate) => candidate.id === movement.orderId) : undefined
+      const orderId = getCashMovementOrderId(movement, orders)
+      const order = orderId ? orders.find((candidate) => candidate.id === orderId) : undefined
       const isIncome = movement.type === 'Ingreso'
       const isPen = (movement.currency ?? 'PEN') === 'PEN'
       return [
         formatDateTime(movement.timestamp),
         movement.concept,
-        movement.orderId ? `#${movement.orderId}` : '',
+        orderId ? `#${orderId}` : '',
         movement.contact ?? order?.customer ?? '',
         movement.paymentMethod ?? 'Efectivo',
         isIncome && isPen ? movement.amount : 0,
@@ -302,16 +315,19 @@ function CashRegisterView() {
                   <tr><th className="px-5 py-3">Hora</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Concepto</th><th className="px-4 py-3">Medio de pago</th><th className="px-4 py-3">Vinculación</th><th className="px-5 py-3 text-right">Monto</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {cashRegister.movements.map((movement) => (
-                    <tr key={movement.id} className="text-xs text-slate-400">
-                      <td className="px-5 py-4 tabular-nums">{formatTime(movement.timestamp)}</td>
-                      <td className="px-4 py-4"><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${movement.type === 'Ingreso' ? 'bg-lime-950/30 text-lime-300' : 'bg-rose-950/30 text-rose-200'}`}>{movement.type === 'Ingreso' ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}{movement.type}</span></td>
-                      <td className="px-4 py-4 font-medium text-slate-300">{movement.concept}</td>
-                      <td className="px-4 py-4">{movement.paymentMethod ?? 'Efectivo'}</td>
-                      <td className="px-4 py-4 text-slate-400">{movement.orderId ? `#${movement.orderId}` : 'Taller'}</td>
-                      <td className={`px-5 py-4 text-right font-bold tabular-nums ${movement.type === 'Ingreso' ? 'text-emerald-300' : 'text-rose-300'}`}>{movement.type === 'Ingreso' ? '+' : '-'}{formatAmount(movement.amount, movement.currency ?? 'PEN')}</td>
-                    </tr>
-                  ))}
+                  {cashRegister.movements.map((movement) => {
+                    const orderId = getCashMovementOrderId(movement, orders)
+                    return (
+                      <tr key={movement.id} className="text-xs text-slate-400">
+                        <td className="px-5 py-4 tabular-nums">{formatTime(movement.timestamp)}</td>
+                        <td className="px-4 py-4"><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${movement.type === 'Ingreso' ? 'bg-lime-950/30 text-lime-300' : 'bg-rose-950/30 text-rose-200'}`}>{movement.type === 'Ingreso' ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}{movement.type}</span></td>
+                        <td className="px-4 py-4 font-medium text-slate-300">{movement.concept}</td>
+                        <td className="px-4 py-4">{movement.paymentMethod ?? 'Efectivo'}</td>
+                        <td className="px-4 py-4 text-slate-400">{orderId ? `OT #${orderId}` : 'Taller'}</td>
+                        <td className={`px-5 py-4 text-right font-bold tabular-nums ${movement.type === 'Ingreso' ? 'text-emerald-300' : 'text-rose-300'}`}>{movement.type === 'Ingreso' ? '+' : '-'}{formatAmount(movement.amount, movement.currency ?? 'PEN')}</td>
+                      </tr>
+                    )
+                  })}
                   {cashRegister.movements.length === 0 && <tr><td colSpan={6} className="px-5 py-12 text-center text-xs text-slate-400">Aún no hay movimientos registrados en esta caja.</td></tr>}
                 </tbody>
               </table>
@@ -339,12 +355,6 @@ function CashRegisterView() {
                 className="inline-flex h-9 items-center gap-2 rounded-lg bg-rose-600 px-3.5 text-xs font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileDown size={14} /> Imprimir último cierre
-              </button>
-              <button
-                onClick={() => setDetailSession(mockCashClosure)}
-                className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-700 px-3.5 text-xs font-bold text-slate-300 transition hover:bg-slate-800"
-              >
-                Vista previa demo
               </button>
               <button
                 onClick={() => void runExport(() => exportToExcel(closedSessionRows, closedSessionColumns, 'Reporte Detallado de Cierre de Caja'))}
@@ -458,6 +468,28 @@ function CashRegisterView() {
                   <label className="block text-xs font-semibold text-slate-300">Concepto
                     <input autoFocus required value={concept} onChange={(event) => setConcept(event.target.value)} placeholder="Ej. Pago de servicio" className={fieldClass} />
                   </label>
+                  <label className="block text-xs font-semibold text-slate-300">Tipo de ingreso
+                    <select value={incomeLinkedToOrder ? 'order' : 'general'} onChange={(event) => {
+                      setIncomeLinkedToOrder(event.target.value === 'order')
+                      setSelectedOrderId('')
+                    }} className={fieldClass}>
+                      <option value="general">General del taller</option>
+                      <option value="order">Asociado a orden de servicio</option>
+                    </select>
+                  </label>
+                  {incomeLinkedToOrder && (
+                    <label className="block text-xs font-semibold text-slate-300">Orden de servicio
+                      <select required value={selectedOrderId} onChange={(event) => setSelectedOrderId(event.target.value)} className={fieldClass}>
+                        <option value="">Selecciona una orden</option>
+                        {linkableOrders.map((order) => (
+                          <option key={order.id} value={order.id}>
+                            #{order.id} · {order.customer} · {order.vehicle.make} {order.vehicle.model} · {order.status}
+                          </option>
+                        ))}
+                      </select>
+                      {linkableOrders.length === 0 && <span className="mt-1.5 block text-[11px] font-medium text-rose-300">No hay órdenes de servicio disponibles.</span>}
+                    </label>
+                  )}
                   <label className="block text-xs font-semibold text-slate-300">Medio de pago
                     <select value={paymentMethod} onChange={(event) => {
                       const nextMethod = paymentMethods.find((method) => method === event.target.value)
@@ -580,14 +612,12 @@ function CashRegisterView() {
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
               <div>
                 <h3 id="closed-session-title" className="text-sm font-bold text-slate-100">Reporte de Cierre de Caja</h3>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  {detailSession.id === mockCashClosure.id ? 'Vista previa · Datos de ejemplo' : `${formatDateTime(detailSession.closedAt)} · ${detailSession.closedBy}`}
-                </p>
+                <p className="mt-1 text-[11px] text-slate-400">{formatDateTime(detailSession.closedAt)} · {detailSession.closedBy}</p>
               </div>
               <button aria-label="Cerrar detalle" onClick={() => setDetailSession(null)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-300"><X size={17} /></button>
             </div>
             <div className="max-h-[calc(94vh-70px)] overflow-y-auto p-5">
-              <CashClosureReport session={detailSession} />
+              <CashClosureReport session={detailSession} orders={orders} />
             </div>
           </section>
         </div>

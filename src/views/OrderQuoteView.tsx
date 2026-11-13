@@ -14,6 +14,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import QuotationPDFTemplate from '../components/QuotationPDFTemplate'
 import NumericInput from '../components/NumericInput'
 import { useDemoData } from '../contexts/useDemoData'
+import type { BankAccount } from '../data/mockBanks'
 import { laborConfig } from '../data/laborConfig'
 import type { CashMovement, InventoryItem, OrderServiceItem, Payment } from '../types'
 
@@ -29,6 +30,21 @@ const cashPaymentMethodByLabel: Record<string, NonNullable<CashMovement['payment
   Plin: 'Plin',
   'Tarjeta de crédito': 'Tarjeta de crédito',
   'Tarjeta de débito': 'Tarjeta de débito',
+}
+
+function getCashPaymentMethod(account: BankAccount): NonNullable<CashMovement['paymentMethod']> | null {
+  const accountLabel = `${account.id} ${account.name} ${account.number}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+
+  if (accountLabel.includes('yape')) return 'Yape'
+  if (accountLabel.includes('plin')) return 'Plin'
+  if (account.type === 'Tarjeta de crédito' || accountLabel.includes('credito')) return 'Tarjeta de crédito'
+  if (accountLabel.includes('debito')) return 'Tarjeta de débito'
+  if (accountLabel.includes('transfer')) return 'Transferencia'
+  if (account.type === 'Efectivo' || accountLabel.includes('efectivo') || accountLabel.includes('cash')) return 'Efectivo'
+  return null
 }
 
 function calculateTotals(items: OrderServiceItem[], globalDiscount: number, includeApprovedOnly: boolean): Totals {
@@ -268,6 +284,9 @@ function OrderQuoteView({ mode }: Props) {
     }
     invoiceIssuanceStarted.current = true
     const { issuedAt, movement: invoiceMovement } = createInvoiceMovement(order.id, approvedTotals.total)
+    const pendingAmount = Math.max(0, approvedTotals.total - paidTotal)
+    const cashPaymentMethod = getCashPaymentMethod(account)
+    const cashMovementId = `cash-invoice-${order.id}`
     setInventory((current) => deductInvoicedInventory(current, items))
     setOrders((current) => current.map((candidate) => candidate.id === order.id
       ? {
@@ -289,7 +308,31 @@ function OrderQuoteView({ mode }: Props) {
       ...current,
       [account.id]: [invoiceMovement, ...(current[account.id] ?? [])],
     }))
-    setInvoiceSuccessMessage(`Factura emitida con éxito. Se han sumado ${currency.format(approvedTotals.total)} a la cuenta ${account.name}.`)
+    if (cashRegister && pendingAmount > 0 && cashPaymentMethod) {
+      const cashMovement: CashMovement = {
+        id: cashMovementId,
+        type: 'Ingreso',
+        concept: `Factura #${order.id}`,
+        amount: pendingAmount,
+        timestamp: issuedAt,
+        paymentMethod: cashPaymentMethod,
+        currency: 'PEN',
+        orderId: order.id,
+        contact: order.customer,
+      }
+      setCashRegister((current) => {
+        if (!current || current.movements.some((movement) => movement.id === cashMovementId)) return current
+        return { ...current, movements: [...current.movements, cashMovement] }
+      })
+    }
+    const cashNotice = pendingAmount === 0
+      ? 'Los abonos previos ya registrados no se duplicaron en el cierre de caja.'
+      : !cashRegister
+        ? 'No había una caja abierta; este ingreso no aparecerá en un reporte de cierre.'
+        : !cashPaymentMethod
+          ? `No se pudo agregar el ingreso a caja porque no se reconoció el medio de pago de ${account.name}.`
+          : `Se agregó el saldo pendiente de ${currency.format(pendingAmount)} a la caja abierta, vinculado a la OT #${order.id}.`
+    setInvoiceSuccessMessage(`Factura emitida con éxito. Se han sumado ${currency.format(approvedTotals.total)} a la cuenta ${account.name}. ${cashNotice}`)
     setInvoiceSuccessOpen(true)
   }
 

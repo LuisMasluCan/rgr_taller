@@ -1,8 +1,10 @@
 import { Printer } from 'lucide-react'
 import type { CashMovement, ClosedCashSession } from '../types'
+import { getCashMovementOrderId } from '../utils/cashMovementOrder'
 
 type Props = {
   session: ClosedCashSession
+  orders: { id: string }[]
 }
 
 type PaymentRow = {
@@ -49,7 +51,7 @@ function getPaymentTotals(movements: CashMovement[], method: PaymentRow['method'
   }
 }
 
-function CashClosureReport({ session }: Props) {
+function CashClosureReport({ session, orders }: Props) {
   const differenceLabel = session.difference === 0 ? 'Cuadrado' : session.difference < 0 ? 'Faltante' : 'Sobrante'
   const differenceClass = session.difference === 0
     ? 'cash-report-balanced'
@@ -132,11 +134,12 @@ function CashClosureReport({ session }: Props) {
               {session.movements.map((movement) => {
                 const isPen = (movement.currency ?? 'PEN') === 'PEN'
                 const amount = isPen ? formatAmount(movement.amount) : formatAmount(movement.amount, 'USD')
+                const orderId = getCashMovementOrderId(movement, orders)
                 return (
                   <tr key={movement.id}>
                     <td>{formatDateTime(movement.timestamp)}</td>
                     <td>{movement.concept}</td>
-                    <td><span className={`cash-link-badge ${movement.orderId ? 'cash-link-order' : 'cash-link-workshop'}`}>{movement.orderId ? `OT #${movement.orderId}` : 'Taller'}</span></td>
+                    <td><span className={`cash-link-badge ${orderId ? 'cash-link-order' : 'cash-link-workshop'}`}>{orderId ? `OT #${orderId}` : 'Taller'}</span></td>
                     <td>{movement.paymentMethod ?? 'Efectivo'}</td>
                     <td className="cash-report-income">{movement.type === 'Ingreso' ? amount : '—'}</td>
                     <td className="cash-report-expense">{movement.type === 'Egreso' ? amount : '—'}</td>
