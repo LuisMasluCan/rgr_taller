@@ -3,7 +3,9 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useDemoData } from '../contexts/useDemoData'
 import NumericInput from '../components/NumericInput'
 import type { CashMovement, ClosedCashSession } from '../types'
-import { exportToExcel, exportToPdf, type ExportCell } from '../utils/exportUtils'
+import { mockCashClosure } from '../data/mockCashClosure'
+import CashClosureReport from './CashClosureReport'
+import { exportToExcel, type ExportCell } from '../utils/exportUtils'
 
 type ModalMode = 'open' | 'income' | 'expense' | 'close' | null
 
@@ -329,11 +331,20 @@ function CashRegisterView() {
             </div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => void runExport(() => exportToPdf(closedSessionRows, closedSessionColumns, 'Reporte Detallado de Cierre de Caja'))}
+                onClick={() => {
+                  const latestSession = closedSessions[0]
+                  if (latestSession) setDetailSession(latestSession)
+                }}
                 disabled={!closedSessions.length}
                 className="inline-flex h-9 items-center gap-2 rounded-lg bg-rose-600 px-3.5 text-xs font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <FileDown size={14} /> Exportar PDF
+                <FileDown size={14} /> Imprimir último cierre
+              </button>
+              <button
+                onClick={() => setDetailSession(mockCashClosure)}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-700 px-3.5 text-xs font-bold text-slate-300 transition hover:bg-slate-800"
+              >
+                Vista previa demo
               </button>
               <button
                 onClick={() => void runExport(() => exportToExcel(closedSessionRows, closedSessionColumns, 'Reporte Detallado de Cierre de Caja'))}
@@ -564,98 +575,19 @@ function CashRegisterView() {
       )}
 
       {detailSession && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailSession(null) }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="closed-session-title" className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-xl bg-slate-900 shadow-xl">
+        <div className="print-preview-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailSession(null) }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="closed-session-title" className="max-h-[94vh] w-full max-w-6xl overflow-hidden rounded-xl bg-slate-900 shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
               <div>
-                <h3 id="closed-session-title" className="text-sm font-bold text-slate-100">Detalle de Caja Cerrada</h3>
-                <p className="mt-1 text-[11px] text-slate-400">{formatDateTime(detailSession.closedAt)} · {detailSession.closedBy}</p>
+                <h3 id="closed-session-title" className="text-sm font-bold text-slate-100">Reporte de Cierre de Caja</h3>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {detailSession.id === mockCashClosure.id ? 'Vista previa · Datos de ejemplo' : `${formatDateTime(detailSession.closedAt)} · ${detailSession.closedBy}`}
+                </p>
               </div>
               <button aria-label="Cerrar detalle" onClick={() => setDetailSession(null)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-300"><X size={17} /></button>
             </div>
-            <div className="flex max-h-[calc(90vh-70px)] flex-col gap-5 overflow-y-auto p-5">
-              <div className="order-2 rounded-lg border border-slate-700 bg-slate-800/70 px-4 py-3">
-                <h4 className="text-xs font-bold uppercase tracking-wide text-slate-100">General del cierre</h4>
-                <p className="mt-1 text-[10px] text-slate-400">Saldos, totales y diferencia de caja.</p>
-              </div>
-              <div className="order-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <SummaryRow label="Monto Inicial (PEN · USD)" amount={formatBothCurrencies(detailSession.initialAmount, detailSession.initialAmountUsd ?? 0)} />
-                <SummaryRow label="Total Ingresos (PEN · USD)" amount={formatBothCurrencies(detailSession.totalIncomes, detailSession.totalIncomesUsd ?? 0)} positive />
-                <SummaryRow label="Total Egresos (PEN · USD)" amount={formatBothCurrencies(detailSession.totalExpenses, detailSession.totalExpensesUsd ?? 0)} negative />
-                <SummaryRow label="Saldo Esperado en efectivo (PEN · USD)" amount={formatBothCurrencies(detailSession.expectedBalance, detailSession.expectedBalanceUsd ?? 0)} strong />
-                <SummaryRow label="Saldo Real en efectivo (PEN · USD)" amount={formatBothCurrencies(detailSession.actualBalance, detailSession.actualBalanceUsd ?? 0)} strong />
-                <SummaryRow
-                  label="Diferencia (PEN · USD)"
-                  amount={`${detailSession.difference === 0
-                    ? formatAmount(0)
-                    : `${detailSession.difference < 0 ? 'Faltante' : 'Sobrante'} ${formatAmount(Math.abs(detailSession.difference))}`} · ${(detailSession.differenceUsd ?? 0) === 0
-                    ? formatAmount(0, 'USD')
-                    : `${(detailSession.differenceUsd ?? 0) < 0 ? 'Faltante' : 'Sobrante'} ${formatAmount(Math.abs(detailSession.differenceUsd ?? 0), 'USD')}`}`}
-                  negative={detailSession.difference < 0}
-                  positive={detailSession.difference > 0}
-                />
-              </div>
-              {detailSession.openingObservations && (
-                <p className="order-5 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de apertura:</strong> {detailSession.openingObservations}</p>
-              )}
-              {detailSession.observations && (
-                <p className="order-5 rounded-lg bg-slate-800 px-4 py-3 text-xs text-slate-400"><strong className="text-slate-200">Observaciones de cierre:</strong> {detailSession.observations}</p>
-              )}
-              <div className="order-4 overflow-hidden rounded-lg border border-slate-700">
-                <div className="border-b border-slate-800 px-4 py-3">
-                  <h4 className="text-xs font-bold text-slate-200">Totales generales por medio de pago</h4>
-                  <p className="mt-1 text-[10px] text-slate-400">Ingresos y egresos agrupados por medio de pago y moneda.</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[640px] text-left">
-                    <thead className="bg-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      <tr><th className="px-4 py-3">Medio de pago</th><th className="px-4 py-3 text-right">Ingresos (PEN)</th><th className="px-4 py-3 text-right">Egresos (PEN)</th><th className="px-4 py-3 text-right">Ingresos (USD)</th><th className="px-4 py-3 text-right">Egresos (USD)</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {getPaymentBreakdown(detailSession.movements)
-                        .filter((breakdown) => breakdown.incomesPen || breakdown.expensesPen || breakdown.incomesUsd || breakdown.expensesUsd)
-                        .map((breakdown) => (
-                          <tr key={breakdown.method} className="text-xs text-slate-400">
-                            <td className="px-4 py-3 font-medium text-slate-300">{breakdown.method}</td>
-                            <td className="px-4 py-3 text-right tabular-nums text-emerald-300">{formatAmount(breakdown.incomesPen)}</td>
-                            <td className="px-4 py-3 text-right tabular-nums text-rose-300">{formatAmount(breakdown.expensesPen)}</td>
-                            <td className="px-4 py-3 text-right tabular-nums text-emerald-300">{formatAmount(breakdown.incomesUsd, 'USD')}</td>
-                            <td className="px-4 py-3 text-right tabular-nums text-rose-300">{formatAmount(breakdown.expensesUsd, 'USD')}</td>
-                          </tr>
-                        ))}
-                      {!detailSession.movements.length && <tr><td colSpan={5} className="px-4 py-6 text-center text-xs text-slate-400">No hay movimientos para desglosar.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="order-1 overflow-hidden rounded-lg border border-slate-700">
-                <div className="border-b border-slate-800 px-4 py-3">
-                  <h4 className="text-xs font-bold text-slate-200">Movimientos</h4>
-                  <p className="mt-1 text-[10px] text-slate-400">Cada importe aparece en Ingreso o Egreso según el tipo de movimiento.</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1020px] text-left">
-                    <thead className="bg-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      <tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Concepto</th><th className="px-4 py-3">OT</th><th className="px-4 py-3">Contacto</th><th className="px-4 py-3">Medio de pago</th><th className="px-4 py-3 text-right">Ingreso</th><th className="px-4 py-3 text-right">Egreso</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {detailSession.movements.map((movement) => (
-                        <tr key={movement.id} className="text-xs text-slate-400">
-                          <td className="px-4 py-3 tabular-nums">{formatDateTime(movement.timestamp)}</td>
-                          <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${movement.type === 'Ingreso' ? 'bg-lime-950/30 text-lime-300' : 'bg-rose-950/30 text-rose-200'}`}>{movement.type}</span></td>
-                          <td className="px-4 py-3">{movement.concept}</td>
-                          <td className="px-4 py-3">{movement.orderId ? `#${movement.orderId}` : 'Taller'}</td>
-                          <td className="px-4 py-3">{movement.contact ?? orders.find((order) => order.id === movement.orderId)?.customer ?? ''}</td>
-                          <td className="px-4 py-3">{movement.paymentMethod ?? 'Efectivo'}</td>
-                          <td className="px-4 py-3 text-right font-semibold tabular-nums text-emerald-300">{movement.type === 'Ingreso' ? formatAmount(movement.amount, movement.currency ?? 'PEN') : '—'}</td>
-                          <td className="px-4 py-3 text-right font-semibold tabular-nums text-rose-300">{movement.type === 'Egreso' ? formatAmount(movement.amount, movement.currency ?? 'PEN') : '—'}</td>
-                        </tr>
-                      ))}
-                      {detailSession.movements.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-xs text-slate-400">Esta caja no registró movimientos.</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            <div className="max-h-[calc(94vh-70px)] overflow-y-auto p-5">
+              <CashClosureReport session={detailSession} />
             </div>
           </section>
         </div>
