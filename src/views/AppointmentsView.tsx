@@ -1,4 +1,4 @@
-import { CalendarDays, CarFront, Clock3, Pencil, Plus, Trash2, UserRound, X } from 'lucide-react'
+import { CalendarDays, CarFront, Clock3, Pencil, Plus, Search, Trash2, UserRound, X } from 'lucide-react'
 import { useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ActionConfirmModal, { type ActionConfirmation } from '../components/ActionConfirmModal'
@@ -38,6 +38,8 @@ function AppointmentsView() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null)
   const [draft, setDraft] = useState<AppointmentDraft>(blankDraft())
+  const [clientSearch, setClientSearch] = useState('')
+  const [clientPickerOpen, setClientPickerOpen] = useState(false)
   const [error, setError] = useState('')
   const [confirmation, setConfirmation] = useState<ActionConfirmation | null>(null)
   const orderSequence = useRef(0)
@@ -47,6 +49,14 @@ function AppointmentsView() {
 
   const selectedClient = clients.find((client) => client.id === draft.customerId)
   const availableVehicles = selectedClient?.vehicles ?? []
+  const normalizedClientSearch = clientSearch.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const matchingClients = normalizedClientSearch
+    ? clients.filter((client) => `${client.name} ${client.vehicles.map((vehicle) => vehicle.plate).join(' ')}`
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .includes(normalizedClientSearch))
+    : []
   const sortedAppointments = useMemo(
     () => appointments.slice().sort((left, right) => `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`)),
     [appointments],
@@ -58,6 +68,8 @@ function AppointmentsView() {
   const openNewAppointment = () => {
     setEditingAppointmentId(null)
     setDraft({ ...blankDraft(), date: localDateISO() })
+    setClientSearch('')
+    setClientPickerOpen(false)
     setError('')
     setModalOpen(true)
   }
@@ -71,8 +83,18 @@ function AppointmentsView() {
       date: appointment.date,
       time: appointment.time,
     })
+    setClientSearch(clients.find((client) => client.id === appointment.customerId)?.name ?? '')
+    setClientPickerOpen(false)
     setError('')
     setModalOpen(true)
+  }
+
+  const selectClient = (customerId: string) => {
+    const client = clients.find((entry) => entry.id === customerId)
+    if (!client) return
+    setDraft((current) => ({ ...current, customerId, vehicleId: '' }))
+    setClientSearch(client.name)
+    setClientPickerOpen(false)
   }
 
   const saveAppointment = (event: FormEvent<HTMLFormElement>) => {
@@ -276,10 +298,51 @@ function AppointmentsView() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="sm:col-span-2">
                 <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Cliente</span>
-                <select required value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value, vehicleId: '' })} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs outline-none focus:border-slate-700">
-                  <option value="">Selecciona un cliente</option>
-                  {clients.map((client) => <option key={client.id} value={client.id}>{client.name} · {client.id}</option>)}
-                </select>
+                <div className="relative">
+                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    required
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={clientPickerOpen && Boolean(normalizedClientSearch)}
+                    aria-controls="appointment-client-options"
+                    value={clientSearch}
+                    onFocus={() => setClientPickerOpen(true)}
+                    onChange={(event) => {
+                      setClientSearch(event.target.value)
+                      setClientPickerOpen(true)
+                      setDraft((current) => ({ ...current, customerId: '', vehicleId: '' }))
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setClientPickerOpen(false)
+                    }}
+                    placeholder="Buscar por nombre o placa..."
+                    className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 pl-9 pr-3 text-xs outline-none focus:border-slate-700"
+                  />
+                  {clientPickerOpen && normalizedClientSearch && (
+                    <div id="appointment-client-options" role="listbox" className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                      {matchingClients.length ? matchingClients.map((client) => (
+                        <button
+                          key={client.id}
+                          type="button"
+                          role="option"
+                          aria-selected={client.id === draft.customerId}
+                          onClick={() => selectClient(client.id)}
+                          className="flex w-full flex-col px-3 py-2 text-left hover:bg-slate-800"
+                        >
+                          <span className="text-xs font-semibold text-slate-200">{client.name}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {client.vehicles.length
+                              ? client.vehicles.map((vehicle) => `${vehicle.make} ${vehicle.model} · ${vehicle.plate}`).join(' / ')
+                              : 'Sin vehículos registrados'}
+                          </span>
+                        </button>
+                      )) : (
+                        <p className="px-3 py-2 text-xs text-slate-400">No se encontraron clientes por ese nombre o placa.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </label>
               <label className="sm:col-span-2">
                 <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Vehículo</span>
