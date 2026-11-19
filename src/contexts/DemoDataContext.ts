@@ -1,6 +1,6 @@
 import { createContext } from 'react'
 import type { BankAccount, BankMovement } from '../data/mockBanks'
-import type { Appointment, CashRegister, ClosedCashSession, Client, InventoryItem, Order, Supplier, WorkshopAsset, WorkshopCategory, WorkshopSettings } from '../types'
+import type { Appointment, CashRegister, ClosedCashSession, Client, InventoryItem, Order, Quotation, Supplier, WorkshopAsset, WorkshopCategory, WorkshopSettings } from '../types'
 
 export type AdminUser = {
   id: string
@@ -26,6 +26,8 @@ export type DemoDataContextValue = {
   setBankMovements: React.Dispatch<React.SetStateAction<Record<string, BankMovement[]>>>
   orders: Order[]
   setOrders: React.Dispatch<React.SetStateAction<Order[]>>
+  quotations: Quotation[]
+  setQuotations: React.Dispatch<React.SetStateAction<Quotation[]>>
   suppliers: Supplier[]
   setSuppliers: React.Dispatch<React.SetStateAction<Supplier[]>>
   cashRegister: CashRegister

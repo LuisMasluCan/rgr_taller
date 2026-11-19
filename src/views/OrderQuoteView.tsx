@@ -16,7 +16,7 @@ import NumericInput from '../components/NumericInput'
 import { useDemoData } from '../contexts/useDemoData'
 import type { BankAccount } from '../data/mockBanks'
 import { laborConfig } from '../data/laborConfig'
-import type { CashMovement, InventoryItem, OrderServiceItem, Payment } from '../types'
+import type { CashMovement, InventoryItem, Order, OrderServiceItem, Payment, Quotation } from '../types'
 
 type Props = { mode: 'quote' | 'invoice' }
 type Totals = { subtotal: number; discounts: number; base: number; taxes: number; total: number }
@@ -95,13 +95,57 @@ function createInvoiceMovement(orderId: string, amount: number) {
   }
 }
 
+function quotationAsOrder(quotation: Quotation): Order {
+  const statusLabels: Record<Quotation['status'], string> = {
+    DRAFT: 'Borrador',
+    SENT: 'Emitida',
+    APPROVED: 'Aceptada',
+    REJECTED: 'Rechazada',
+    EXPIRED: 'Vencida',
+  }
+  return {
+    id: quotation.id,
+    status: statusLabels[quotation.status],
+    invoiced: false,
+    date: quotation.date,
+    dateISO: quotation.dateISO,
+    quoteItems: quotation.quoteItems,
+    quoteInitialized: true,
+    quoteDiscountPercent: quotation.quoteDiscountPercent,
+    quoteSaved: quotation.status !== 'DRAFT',
+    quoteNumber: quotation.quoteNumber,
+    customer: quotation.customer,
+    email: quotation.email,
+    phone: quotation.phone,
+    mileage: quotation.mileage,
+    arrivalPhotos: [],
+    vehicle: quotation.vehicle,
+    reason: quotation.reason,
+    technician: '',
+    comments: '',
+  }
+}
+
+function createOrderId(dateISO: string, orders: Order[]) {
+  const datePart = dateISO.replaceAll('-', '')
+  let suffix = String(Date.now() % 10000).padStart(4, '0')
+  let id = `${datePart}${suffix}`
+  while (orders.some((order) => order.id === id)) {
+    suffix = String((Number(suffix) + 1) % 10000).padStart(4, '0')
+    id = `${datePart}${suffix}`
+  }
+  return id
+}
+
 function OrderQuoteView({ mode }: Props) {
   const { orderId } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const printOnOpen = searchParams.get('print') === '1'
-  const { orders, setOrders, inventory, setInventory, bankAccounts, setBankAccounts, setBankMovements, cashRegister, setCashRegister, settings, clients, activeProfile } = useDemoData()
-  const order = orders.find((candidate) => candidate.id === orderId)
+  const { orders, setOrders, quotations, setQuotations, inventory, setInventory, bankAccounts, setBankAccounts, setBankMovements, cashRegister, setCashRegister, settings, clients, activeProfile } = useDemoData()
+  const quotation = mode === 'quote' ? quotations.find((candidate) => candidate.id === orderId) : undefined
+  const storedOrder = orders.find((candidate) => candidate.id === orderId)
+  const order = quotation ? quotationAsOrder(quotation) : storedOrder
   const invoiceAllowed = order?.status === 'Entrega'
   const [items, setItems] = useState<OrderServiceItem[]>(() => order?.quoteItems ?? [])
   const [globalDiscount, setGlobalDiscount] = useState(order?.quoteDiscountPercent ?? 0)
@@ -120,6 +164,8 @@ function OrderQuoteView({ mode }: Props) {
   const [paymentError, setPaymentError] = useState('')
   const [paymentWarning, setPaymentWarning] = useState('')
   const [savedNotice, setSavedNotice] = useState('')
+  const [quotationWorkflowError, setQuotationWorkflowError] = useState('')
+  const [quoteDirty, setQuoteDirty] = useState(false)
   const [invoiceSuccessOpen, setInvoiceSuccessOpen] = useState(false)
   const [invoiceSuccessMessage, setInvoiceSuccessMessage] = useState('')
   const invoiceIssuanceStarted = useRef(false)
@@ -140,6 +186,7 @@ function OrderQuoteView({ mode }: Props) {
 
   const updateItem = (id: string, patch: Partial<OrderServiceItem>) => {
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item))
+    setQuoteDirty(true)
     setSavedNotice('')
   }
 
@@ -162,12 +209,13 @@ function OrderQuoteView({ mode }: Props) {
       discount: 0,
       taxRate: selectedTax,
       quantity: 1,
-      status: 'Aprobado',
+      status: quotation ? 'Pendiente' : 'Aprobado',
       laborHours: selectedInventoryItem.laborHours ?? (itemType === 'Mano de obra' ? selectedInventoryItem.price / laborConfig.hourlySaleRate : undefined),
     }])
     setQuery('')
     setSelectedInventoryItemId('')
     setUnitPrice('')
+    setQuoteDirty(true)
     setSavedNotice('')
   }
 
@@ -185,6 +233,7 @@ function OrderQuoteView({ mode }: Props) {
       quantity: 1,
       status: 'Pendiente',
     }])
+    setQuoteDirty(true)
     setSavedNotice('')
   }
 
@@ -206,6 +255,25 @@ function OrderQuoteView({ mode }: Props) {
 
   const saveQuote = () => {
     if (!order) return
+    if (quotation) {
+      if (quotation.serviceOrderId) {
+        setQuotationWorkflowError('No se puede modificar una cotización que ya tiene una ODS vinculada.')
+        return
+      }
+      setQuotations((current) => current.map((candidate) => candidate.id === quotation.id
+        ? {
+            ...candidate,
+            quoteItems: items,
+            quoteDiscountPercent: globalDiscount,
+            status: 'SENT',
+            acceptedAt: undefined,
+          }
+        : candidate))
+      setQuotationWorkflowError('')
+      setQuoteDirty(false)
+      setSavedNotice('Cotización emitida. Todavía no se creó una orden de servicio.')
+      return
+    }
     const nextQuoteNumber = String(Math.max(
       616,
       ...orders.map((candidate) => Number(candidate.quoteNumber) || 0),
@@ -220,7 +288,83 @@ function OrderQuoteView({ mode }: Props) {
           quoteNumber: candidate.quoteNumber ?? nextQuoteNumber,
         }
       : candidate))
+    setQuoteDirty(false)
     setSavedNotice('Cotización guardada en esta orden.')
+  }
+
+  const acceptQuotation = () => {
+    if (!quotation || quotation.status !== 'SENT') return
+    if (quoteDirty) {
+      setQuotationWorkflowError('Emite nuevamente la cotización para que la aceptación corresponda a la versión vigente.')
+      return
+    }
+    setQuotations((current) => current.map((candidate) => candidate.id === quotation.id
+      ? { ...candidate, status: 'APPROVED', acceptedAt: new Date().toISOString() }
+      : candidate))
+    setQuotationWorkflowError('')
+    setSavedNotice('Aceptación registrada. Crea la ODS cuando el vehículo vaya a ingresar al taller.')
+  }
+
+  const createOrderFromQuotation = () => {
+    if (!quotation || quotation.status !== 'APPROVED') return
+    if (quoteDirty) {
+      setQuotationWorkflowError('Emite nuevamente la cotización antes de crear la ODS.')
+      return
+    }
+    if (quotation.serviceOrderId || orders.some((candidate) => candidate.sourceQuoteId === quotation.id)) {
+      setQuotationWorkflowError('Esta cotización ya está vinculada a una orden de servicio.')
+      return
+    }
+    const client = clients.find((candidate) => candidate.id === quotation.customerId)
+    const vehicle = client?.vehicles.find((candidate) => candidate.id === quotation.vehicleId)
+    if (!client || !vehicle) {
+      setQuotationWorkflowError('No se puede crear la ODS porque el cliente o el vehículo ya no está registrado.')
+      return
+    }
+
+    const now = new Date()
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset())
+    const dateISO = now.toISOString().slice(0, 10)
+    const createdAt = new Date().toISOString()
+    const id = createOrderId(dateISO, orders)
+    const newOrder: Order = {
+      id,
+      sourceQuoteId: quotation.id,
+      status: 'Recepción',
+      timestamps: { fechaIngreso: createdAt },
+      invoiced: false,
+      dateISO,
+      date: new Intl.DateTimeFormat('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }).format(now),
+      quoteItems: quotation.quoteItems.map((item) => ({ ...item, status: 'Aprobado' })),
+      quoteInitialized: true,
+      quoteDiscountPercent: quotation.quoteDiscountPercent,
+      quoteSaved: true,
+      quoteNumber: quotation.quoteNumber,
+      payments: [],
+      customer: client.name,
+      email: client.email,
+      phone: client.phone,
+      mileage: quotation.mileage,
+      arrivalPhotos: [],
+      vehicle: {
+        make: vehicle.make,
+        model: vehicle.model,
+        year: vehicle.year,
+        plate: vehicle.plate,
+        vin: vehicle.vin,
+      },
+      reason: quotation.reason,
+      technician: 'Por asignar',
+      comments: `Ingreso iniciado desde la cotización #${quotation.quoteNumber}.`,
+    }
+    setOrders((current) => current.some((candidate) => candidate.sourceQuoteId === quotation.id)
+      ? current
+      : [newOrder, ...current])
+    setQuotations((current) => current.map((candidate) => candidate.id === quotation.id
+      ? { ...candidate, serviceOrderId: id }
+      : candidate))
+    setQuotationWorkflowError('')
+    navigate(`/orders?stage=${encodeURIComponent('Recepción')}`)
   }
 
   const addPayment = (event: FormEvent<HTMLFormElement>) => {
@@ -346,7 +490,7 @@ function OrderQuoteView({ mode }: Props) {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><div className="flex items-center gap-2 text-[11px] text-slate-400"><span>{isInvoice ? 'Órdenes de servicio' : 'Cotizaciones'}</span><span>/</span><span className="font-semibold text-slate-400">#{order.id}</span></div><h2 className="mt-1 text-lg font-bold tracking-tight text-slate-100">{isInvoice ? 'Facturación final' : 'Cotización de servicio'}</h2></div>
+        <div><div className="flex items-center gap-2 text-[11px] text-slate-400"><span>{isInvoice ? 'Órdenes de servicio' : 'Cotizaciones'}</span><span>/</span><span className="font-semibold text-slate-400">#{order.quoteNumber ?? order.id}</span></div><h2 className="mt-1 text-lg font-bold tracking-tight text-slate-100">{isInvoice ? 'Facturación final' : 'Cotización de servicio'}</h2></div>
         <button onClick={() => navigate(isInvoice ? '/orders' : '/quotes')} className="no-print flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-400 shadow-lg hover:bg-slate-800"><ArrowLeft size={15} /> Volver</button>
       </div>
 
@@ -354,8 +498,28 @@ function OrderQuoteView({ mode }: Props) {
         <OrderInfo label="CLIENTE" value={order.customer} />
         <OrderInfo label="VEHÍCULO" value={`${order.vehicle.make} ${order.vehicle.model} · ${order.vehicle.plate}`} />
         <OrderInfo label="VIN / KM INGRESO" value={`${order.vehicle.vin || 'VIN no registrado'} · ${order.mileage.toLocaleString('es-PE')} km`} />
-        <OrderInfo label="ESTADO DE ORDEN" value={order.status} />
+        <OrderInfo label={quotation ? 'ESTADO DE COTIZACIÓN' : 'ESTADO DE ORDEN'} value={order.status} />
       </section>
+
+      {quotation && (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900 p-4">
+          <div>
+            <p className="text-xs font-bold text-slate-100">Flujo de la cotización</p>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {quotation.status === 'DRAFT' && 'Completa los ítems y emite la cotización al cliente.'}
+              {quotation.status === 'SENT' && 'La cotización está emitida. Registra aquí la aceptación del cliente.'}
+              {quotation.status === 'APPROVED' && !quotation.serviceOrderId && 'Aceptada. Crea la ODS solo cuando el vehículo vaya a ingresar al taller.'}
+              {quotation.serviceOrderId && `Vinculada a la ODS #${quotation.serviceOrderId}.`}
+              {quotation.status === 'REJECTED' && 'El cliente rechazó esta cotización.'}
+              {quotation.status === 'EXPIRED' && 'Esta cotización venció.'}
+            </p>
+          </div>
+          {quotation.status === 'SENT' && <button type="button" disabled={quoteDirty} onClick={acceptQuotation} className="rounded-lg bg-emerald-300 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50">REGISTRAR ACEPTACIÓN</button>}
+          {quotation.status === 'APPROVED' && !quotation.serviceOrderId && <button type="button" onClick={createOrderFromQuotation} className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-lime-200">CREAR ODS</button>}
+          {quotation.serviceOrderId && <button type="button" onClick={() => navigate(`/orders?stage=${encodeURIComponent('Recepción')}`)} className="rounded-lg border border-sky-400 px-4 py-2.5 text-xs font-bold text-sky-300 hover:bg-sky-950/30">VER ÓRDENES</button>}
+        </section>
+      )}
+      {quotationWorkflowError && <p role="alert" className="text-xs font-semibold text-red-300">{quotationWorkflowError}</p>}
 
       {isInvoice && (!invoiceAllowed || order.invoiced) && (
         <div role="status" className="rounded-xl border border-amber-900/50 bg-amber-950/30 px-4 py-3 text-xs text-amber-200">
@@ -372,7 +536,7 @@ function OrderQuoteView({ mode }: Props) {
 
       <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-4 py-4 sm:px-5">
-          <div><h3 className="text-sm font-bold text-slate-100">Ítems de la {isInvoice ? 'factura' : 'cotización'}</h3><p className="mt-0.5 text-[11px] text-slate-400">{items.length} conceptos asociados a la orden</p></div>
+          <div><h3 className="text-sm font-bold text-slate-100">Ítems de la {isInvoice ? 'factura' : 'cotización'}</h3><p className="mt-0.5 text-[11px] text-slate-400">{items.length} conceptos {quotation ? 'de la cotización' : 'asociados a la orden'}</p></div>
           <button onClick={addBlankItem} className="flex items-center gap-1.5 rounded-lg bg-lime-300 px-3 py-2 text-[10px] font-extrabold text-slate-950 hover:bg-lime-400"><Plus size={14} /> AGREGAR ÍTEM</button>
         </div>
         <div className="overflow-x-auto">
@@ -427,7 +591,7 @@ function OrderQuoteView({ mode }: Props) {
                     <td className="px-3 py-3"><NumberCell label={`Cantidad ${index + 1}`} value={item.quantity} min={1} onChange={(value) => updateItem(item.id, { quantity: Math.max(1, value) })} /></td>
                     <td className="px-3 py-3 font-bold text-slate-100">{currency.format(lineTotal)}</td>
                     <td className="px-3 py-3"><select aria-label={`Estado ${index + 1}`} value={item.status} onChange={(event) => updateItem(item.id, { status: event.target.value as OrderServiceItem['status'] })} className={`h-7 rounded-full border-0 px-2 text-[9px] font-bold ${item.status === 'Aprobado' ? 'bg-emerald-950/30 text-emerald-300' : 'bg-amber-950/30 text-amber-300'}`}><option>Aprobado</option><option>Pendiente</option></select></td>
-                    <td className="px-3 py-3"><button aria-label={`Eliminar ${item.description || `ítem ${index + 1}`}`} onClick={() => setItems((current) => current.filter((entry) => entry.id !== item.id))} className="flex h-8 w-8 items-center justify-center rounded-lg text-red-500 hover:bg-red-950/30"><Trash2 size={14} /></button></td>
+                    <td className="px-3 py-3"><button aria-label={`Eliminar ${item.description || `ítem ${index + 1}`}`} onClick={() => { setItems((current) => current.filter((entry) => entry.id !== item.id)); setQuoteDirty(true) }} className="flex h-8 w-8 items-center justify-center rounded-lg text-red-500 hover:bg-red-950/30"><Trash2 size={14} /></button></td>
                   </tr>
                 )
               })}
@@ -437,7 +601,7 @@ function OrderQuoteView({ mode }: Props) {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 px-4 py-3 sm:px-5">
           <button onClick={addBlankItem} className="flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-950/30"><Plus size={15} /> Agregar ítem</button>
-          <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-[10px] font-semibold text-slate-400"><span>% Descuento a todos los ítems</span><NumericInput aria-label="Descuento general" min="0" max="100" step="0.1" value={globalDiscount} onChange={(value) => { setGlobalDiscount(Math.min(100, Math.max(0, Number(value) || 0))); setSavedNotice('') }} className="h-7 w-16 rounded border border-slate-700 bg-slate-900 px-2 text-right text-xs outline-none focus:border-slate-700" /><span>%</span></label>
+          <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-[10px] font-semibold text-slate-400"><span>% Descuento a todos los ítems</span><NumericInput aria-label="Descuento general" min="0" max="100" step="0.1" value={globalDiscount} onChange={(value) => { setGlobalDiscount(Math.min(100, Math.max(0, Number(value) || 0))); setQuoteDirty(true); setSavedNotice('') }} className="h-7 w-16 rounded border border-slate-700 bg-slate-900 px-2 text-right text-xs outline-none focus:border-slate-700" /><span>%</span></label>
         </div>
       </section>
 
@@ -456,11 +620,11 @@ function OrderQuoteView({ mode }: Props) {
       </section>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <section className="rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-lg sm:p-5">
+        {!quotation && <section className="rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-lg sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-bold text-slate-100">Abonos / pagos</h3><p className="mt-0.5 text-[11px] text-slate-400">Registra pagos parciales asociados a esta orden.</p></div><button onClick={() => { setPaymentError(''); setPaymentWarning(''); setPaymentAmount(''); setDepositModal(true) }} className="flex h-9 items-center gap-1.5 rounded-lg bg-lime-300 px-3 text-[10px] font-extrabold text-slate-950 hover:bg-lime-400"><Plus size={14} /> REGISTRAR ABONO</button></div>
           <div className="overflow-x-auto"><table className="w-full min-w-[460px] text-left"><thead className="bg-slate-800 text-[9px] font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-2.5">Fecha</th><th className="px-3 py-2.5">Método</th><th className="px-3 py-2.5">Concepto</th><th className="px-3 py-2.5 text-right">Valor</th></tr></thead><tbody className="divide-y divide-slate-100">{payments.map((payment) => <tr key={payment.id} className="text-[10px] text-slate-400"><td className="px-3 py-3">{payment.date}</td><td className="px-3 py-3">{payment.method}</td><td className="px-3 py-3">{payment.concept}</td><td className="px-3 py-3 text-right font-semibold">{currency.format(payment.amount)}</td></tr>)}{!payments.length && <tr><td colSpan={4} className="px-3 py-8 text-center text-xs text-slate-400">Todavía no hay abonos registrados.</td></tr>}</tbody></table></div>
           <div className="mt-4 flex items-center justify-between rounded-lg bg-slate-900 px-4 py-3.5 text-white"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">Pendiente por pagar</span><strong className="text-lg">{currency.format(pendingTotal)}</strong></div>
-        </section>
+        </section>}
 
         <section className="rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-lg sm:p-5">
           <div className="mb-4 flex items-center justify-between"><div><h3 className="text-sm font-bold text-slate-100">Presupuesto</h3><p className="mt-0.5 text-[11px] text-slate-400">Comparativa de cotizado y aprobado.</p></div>          <span className="rounded-md border border-slate-700 bg-transparent px-2 py-1 text-[9px] font-bold uppercase text-slate-400">PEN · Soles</span></div>
@@ -483,9 +647,9 @@ function OrderQuoteView({ mode }: Props) {
       </footer>
 
       {quotePrintOpen && (
-        <div className="print-preview-overlay fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={`Cotización #${order.id}`}>
+        <div className="print-preview-overlay fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={`Cotización #${order.quoteNumber ?? order.id}`}>
           <div className="no-print mx-auto mb-4 flex max-w-[900px] items-center justify-between rounded-xl bg-slate-900 px-4 py-3 shadow-lg">
-            <div><p className="text-sm font-bold text-slate-100">Vista previa de cotización</p><p className="mt-0.5 text-[10px] text-slate-400">#{order.id} · Listo para imprimir o guardar como PDF</p></div>
+            <div><p className="text-sm font-bold text-slate-100">Vista previa de cotización</p><p className="mt-0.5 text-[10px] text-slate-400">#{order.quoteNumber ?? order.id} · Listo para imprimir o guardar como PDF</p></div>
             <button type="button" aria-label="Cerrar" onClick={() => setQuotePrintOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800"><X size={18} /></button>
           </div>
           <QuotationPDFTemplate

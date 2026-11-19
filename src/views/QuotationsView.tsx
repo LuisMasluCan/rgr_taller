@@ -6,24 +6,35 @@ import NumericInput from '../components/NumericInput'
 import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import { useDemoData } from '../contexts/useDemoData'
 import { calculateOrderTotals } from '../utils/orderTotals'
-import type { Order } from '../types'
+import type { Order, Quotation } from '../types'
 
 const todayISO = () => {
   const date = new Date()
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
   return date.toISOString().slice(0, 10)
 }
-const currentTimestamp = () => new Date().toISOString()
 const currency = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', maximumFractionDigits: 2 })
-function createOrderId(dateISO: string, orders: Order[]) {
-  const datePart = dateISO.replaceAll('-', '')
-  let suffix = String(Date.now() % 10000).padStart(4, '0')
-  let id = `${datePart}${suffix}`
-  while (orders.some((order) => order.id === id)) {
-    suffix = String((Number(suffix) + 1) % 10000).padStart(4, '0')
-    id = `${datePart}${suffix}`
-  }
-  return id
+type QuoteRow = {
+  id: string
+  quoteNumber: string
+  date: string
+  customer: string
+  plate: string
+  items: Order['quoteItems']
+  discount: number
+  status: string
+  serviceOrderId?: string
+  legacyOrder?: Order
+}
+
+function quoteStatusLabel(status: Quotation['status']): string {
+  return {
+    DRAFT: 'Borrador',
+    SENT: 'Emitida',
+    APPROVED: 'Aceptada',
+    REJECTED: 'Rechazada',
+    EXPIRED: 'Vencida',
+  }[status]
 }
 
 function Toggle({ checked, onChange, children }: { checked: boolean; onChange: () => void; children: string }) {
@@ -38,7 +49,7 @@ function Toggle({ checked, onChange, children }: { checked: boolean; onChange: (
 }
 
 function QuotationsView() {
-  const { orders, setOrders, clients, inventory } = useDemoData()
+  const { orders, setOrders, quotations, setQuotations, clients, inventory } = useDemoData()
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [clientId, setClientId] = useState('')
@@ -55,13 +66,37 @@ function QuotationsView() {
   const availableClients = clients.filter((client) => client.vehicles.length > 0)
   const availableVehicles = selectedClient?.vehicles ?? []
 
-  const savedQuotes = useMemo(
-    () => orders
-      .filter((order) => order.quoteSaved || Boolean(order.quoteNumber) || Boolean(order.quoteItems?.length))
-      .filter((order) => !order.sourceQuoteId)
-      .filter((order) => `${order.quoteNumber ?? order.id} ${order.id} ${order.customer} ${order.vehicle.plate}`.toLowerCase().includes(search.trim().toLowerCase())),
-    [orders, search],
-  )
+  const savedQuotes = useMemo(() => {
+    const newQuotes: QuoteRow[] = quotations.map((quote) => ({
+      id: quote.id,
+      quoteNumber: quote.quoteNumber,
+      date: quote.dateISO,
+      customer: quote.customer,
+      plate: quote.vehicle.plate,
+      items: quote.quoteItems,
+      discount: quote.quoteDiscountPercent,
+      status: quoteStatusLabel(quote.status),
+      serviceOrderId: quote.serviceOrderId,
+    }))
+    const legacyQuotes: QuoteRow[] = orders
+      .filter((order) => (order.quoteSaved || Boolean(order.quoteNumber) || Boolean(order.quoteItems?.length)) && !order.sourceQuoteId)
+      .map((order) => ({
+        id: order.id,
+        quoteNumber: order.quoteNumber ?? order.id,
+        date: order.dateISO ?? order.date,
+        customer: order.customer,
+        plate: order.vehicle.plate,
+        items: order.quoteItems,
+        discount: order.quoteDiscountPercent ?? 0,
+        status: order.quoteSaved ? 'Emitida (registro anterior)' : 'Registro anterior',
+        serviceOrderId: order.convertedToOrderId ?? order.id,
+        legacyOrder: order,
+      }))
+    const query = search.trim().toLowerCase()
+    return [...newQuotes, ...legacyQuotes]
+      .filter((quote) => `${quote.quoteNumber} ${quote.id} ${quote.customer} ${quote.plate}`.toLowerCase().includes(query))
+      .sort((left, right) => right.date.localeCompare(left.date))
+  }, [orders, quotations, search])
   const pageCount = Math.max(1, Math.ceil(savedQuotes.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const visibleQuotes = savedQuotes.slice((currentPage - 1) * pageSize, currentPage * pageSize)
@@ -82,20 +117,23 @@ function QuotationsView() {
 
     const dateISO = todayISO()
     const date = new Date(`${dateISO}T12:00:00`)
-    const id = createOrderId(dateISO, orders)
-    const createdAt = currentTimestamp()
-    const newOrder: Order = {
-      id,
-      status: 'Recepción',
-      timestamps: { fechaIngreso: createdAt },
-      invoiced: false,
-      dateISO,
+    const quoteNumber = String(Math.max(
+      616,
+      ...quotations.map((quote) => Number(quote.quoteNumber) || 0),
+      ...orders.map((order) => Number(order.quoteNumber) || 0),
+    ) + 1)
+    const quotation: Quotation = {
+      id: crypto.randomUUID(),
+      quoteNumber,
+      status: 'DRAFT',
       date: new Intl.DateTimeFormat('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }).format(date),
+      dateISO,
+      customerId: selectedClient.id,
+      vehicleId: vehicle.id,
       customer: selectedClient.name,
       email: selectedClient.email,
       phone: selectedClient.phone,
       mileage: Number(mileage),
-      arrivalPhotos: [],
       vehicle: {
         make: vehicle.make,
         model: vehicle.model,
@@ -104,29 +142,29 @@ function QuotationsView() {
         vin: vehicle.vin,
       },
       reason: reason.trim(),
-      technician: 'Por asignar',
-      comments: '',
       quoteItems: [],
-      quoteInitialized: true,
       quoteDiscountPercent: 0,
-      quoteSaved: false,
-      payments: [],
     }
 
-    setOrders((current) => [newOrder, ...current])
+    setQuotations((current) => [quotation, ...current])
     setCreateOpen(false)
-    navigate(`/quotes/${id}`)
+    navigate(`/quotes/${quotation.id}`)
   }
 
-  const removeQuote = (order: Order) => {
+  const removeQuote = (quote: QuoteRow) => {
+    if (quote.serviceOrderId && !quote.legacyOrder) return
     setConfirmation({
       title: 'Eliminar cotización',
-      message: `¿Deseas quitar la cotización #${order.quoteNumber ?? order.id}? Los datos de la orden de servicio se conservarán.`,
+      message: `¿Deseas quitar la cotización #${quote.quoteNumber}?`,
       confirmLabel: 'ELIMINAR COTIZACIÓN',
       onConfirm: () => {
-        setOrders((current) => current.map((candidate) => candidate.id === order.id
-          ? { ...candidate, quoteSaved: false, quoteNumber: undefined, quoteItems: [], quoteInitialized: true, quoteDiscountPercent: 0 }
-          : candidate))
+        if (quote.legacyOrder) {
+          setOrders((current) => current.map((candidate) => candidate.id === quote.id
+            ? { ...candidate, quoteSaved: false, quoteNumber: undefined, quoteItems: [], quoteInitialized: true, quoteDiscountPercent: 0 }
+            : candidate))
+        } else {
+          setQuotations((current) => current.filter((candidate) => candidate.id !== quote.id))
+        }
         setPage(1)
       },
     })
@@ -157,36 +195,37 @@ function QuotationsView() {
           <section className="overflow-x-auto rounded-xl border border-slate-700 bg-slate-900 shadow-lg">
             <table className="w-full min-w-[900px] border-collapse text-left text-xs">
               <thead className="bg-slate-800/50 text-white">
-                <tr>{['Cotización', 'ODS', 'Fecha', 'Cliente', 'Placa Vehículo', 'Valor', 'Opciones'].map((column) => <th key={column} className="border-b border-slate-700 px-3 py-3 font-bold">{column}</th>)}</tr>
+                <tr>{['Cotización', 'ODS', 'Fecha', 'Cliente', 'Placa Vehículo', 'Valor', 'Estado', 'Opciones'].map((column) => <th key={column} className="border-b border-slate-700 px-3 py-3 font-bold">{column}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {visibleQuotes.map((order) => {
-                  const total = calculateOrderTotals(order.quoteItems ?? [], order.quoteDiscountPercent ?? 0).total
+                {visibleQuotes.map((quote) => {
+                  const total = calculateOrderTotals(quote.items ?? [], quote.discount).total
                   return (
-                    <tr key={order.id} className="text-slate-200 transition hover:bg-slate-800/50">
-                      <td className="px-3 py-3 text-right">{order.quoteNumber ?? order.id}</td>
-                      <td className="px-3 py-3">{order.id}</td>
-                      <td className="px-3 py-3">{order.dateISO ?? order.date}</td>
-                      <td className="px-3 py-3 text-white">{order.customer}</td>
-                      <td className="px-3 py-3">{order.vehicle.plate || '(Sin Placa)'}</td>
+                    <tr key={quote.id} className="text-slate-200 transition hover:bg-slate-800/50">
+                      <td className="px-3 py-3 text-right">{quote.quoteNumber}</td>
+                      <td className="px-3 py-3">{quote.serviceOrderId ?? '—'}</td>
+                      <td className="px-3 py-3">{quote.date}</td>
+                      <td className="px-3 py-3 text-white">{quote.customer}</td>
+                      <td className="px-3 py-3">{quote.plate || '(Sin Placa)'}</td>
                       <td className="px-3 py-3 text-right">{hidePrices ? '••••' : currency.format(total)}</td>
+                      <td className="px-3 py-3">{quote.status}</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-center gap-2">
-                          <button type="button" title="Ver / editar cotización" aria-label={`Ver o editar cotización ${order.quoteNumber ?? order.id}`} onClick={() => navigate(`/quotes/${order.id}`)} className="flex h-8 w-8 items-center justify-center rounded-full border border-sky-400 text-sky-400 transition hover:bg-sky-400/15"><SquarePen size={14} /></button>
-                          <button type="button" title="Imprimir cotización" aria-label={`Imprimir cotización ${order.quoteNumber ?? order.id}`} onClick={() => navigate(`/quotes/${order.id}?print=1`)} className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-400 text-emerald-400 transition hover:bg-emerald-400/15"><Printer size={14} /></button>
-                          <button type="button" title="Eliminar cotización" aria-label={`Eliminar cotización ${order.quoteNumber ?? order.id}`} onClick={() => removeQuote(order)} className="flex h-8 w-8 items-center justify-center rounded-full border border-red-400 text-red-400 transition hover:bg-red-400/15"><Trash2 size={14} /></button>
+                          <button type="button" title="Ver / editar cotización" aria-label={`Ver o editar cotización ${quote.quoteNumber}`} onClick={() => navigate(`/quotes/${quote.id}`)} className="flex h-8 w-8 items-center justify-center rounded-full border border-sky-400 text-sky-400 transition hover:bg-sky-400/15"><SquarePen size={14} /></button>
+                          <button type="button" title="Imprimir cotización" aria-label={`Imprimir cotización ${quote.quoteNumber}`} onClick={() => navigate(`/quotes/${quote.id}?print=1`)} className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-400 text-emerald-400 transition hover:bg-emerald-400/15"><Printer size={14} /></button>
+                          <button type="button" title={quote.serviceOrderId && !quote.legacyOrder ? 'No se puede eliminar una cotización convertida en ODS' : 'Eliminar cotización'} aria-label={`Eliminar cotización ${quote.quoteNumber}`} disabled={Boolean(quote.serviceOrderId && !quote.legacyOrder)} onClick={() => removeQuote(quote)} className="flex h-8 w-8 items-center justify-center rounded-full border border-red-400 text-red-400 transition hover:bg-red-400/15 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>
                   )
                 })}
-                {!visibleQuotes.length && <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400">No hay cotizaciones guardadas.</td></tr>}
+                {!visibleQuotes.length && <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">No hay cotizaciones guardadas.</td></tr>}
               </tbody>
-              {showItemDetails && visibleQuotes.length > 0 && <tfoot><tr><td colSpan={7} className="border-t border-slate-800 p-0">
+              {showItemDetails && visibleQuotes.length > 0 && <tfoot><tr><td colSpan={8} className="border-t border-slate-800 p-0">
                 <div className="grid gap-2 p-4 sm:grid-cols-2">
-                  {visibleQuotes.map((order) => <div key={order.id} className="rounded-lg border border-slate-800 bg-[#0B1120] p-3">
-                    <p className="mb-2 text-[10px] font-bold text-lime-400">#{order.quoteNumber ?? order.id} · {order.customer}</p>
-                    {(order.quoteItems ?? []).length ? order.quoteItems?.map((item) => {
+                  {visibleQuotes.map((quote) => <div key={quote.id} className="rounded-lg border border-slate-800 bg-[#0B1120] p-3">
+                    <p className="mb-2 text-[10px] font-bold text-lime-400">#{quote.quoteNumber} · {quote.customer}</p>
+                    {(quote.items ?? []).length ? quote.items?.map((item) => {
                       const inventoryItem = inventory.find((candidate) => candidate.reference === item.reference)
                       return <div key={item.id} className="py-1 text-[10px] text-slate-300">
                         <div className="flex justify-between gap-3">

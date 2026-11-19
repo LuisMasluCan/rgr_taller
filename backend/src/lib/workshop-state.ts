@@ -9,6 +9,7 @@ import {
   MovementType,
   PaymentMethod,
   Prisma,
+  QuoteStatus,
   ServiceStatus,
   SupplierType,
   type PrismaClient,
@@ -139,6 +140,14 @@ const appointmentStatusNames: Record<AppointmentStatus, string> = {
   SCHEDULED: 'Programada',
   COMPLETED: 'Completada',
   CANCELLED: 'Cancelada',
+}
+
+const quoteStatuses: Record<string, QuoteStatus> = {
+  DRAFT: QuoteStatus.DRAFT,
+  SENT: QuoteStatus.SENT,
+  APPROVED: QuoteStatus.APPROVED,
+  REJECTED: QuoteStatus.REJECTED,
+  EXPIRED: QuoteStatus.EXPIRED,
 }
 
 const paymentMethods: Record<string, PaymentMethod> = {
@@ -280,6 +289,7 @@ export async function getRelationalWorkshopData(): Promise<{ data: Prisma.InputJ
     items,
     categories,
     orders,
+    quotations,
     appointments,
     suppliers,
     assets,
@@ -294,6 +304,10 @@ export async function getRelationalWorkshopData(): Promise<{ data: Prisma.InputJ
     prisma.serviceOrder.findMany({
       include: { customer: true, vehicle: true, items: { include: { item: true } } },
       orderBy: { receptionDate: 'asc' },
+    }),
+    prisma.quotation.findMany({
+      include: { customer: true, vehicle: true, items: { include: { item: true } } },
+      orderBy: { date: 'asc' },
     }),
     prisma.appointment.findMany({ orderBy: [{ date: 'asc' }, { time: 'asc' }] }),
     prisma.supplier.findMany({ orderBy: { name: 'asc' } }),
@@ -423,6 +437,50 @@ export async function getRelationalWorkshopData(): Promise<{ data: Prisma.InputJ
         reason: order.entryReason,
       }
     }),
+    quotations: quotations.map((quotation) => {
+      const legacy = isRecord(quotation.legacyData) ? quotation.legacyData : {}
+      return {
+        ...legacy,
+        id: quotation.id,
+        quoteNumber: String(quotation.consecutiveNumber),
+        status: quotation.status,
+        date: string(legacy.date, quotation.date.toISOString().slice(0, 10)),
+        dateISO: string(legacy.dateISO, quotation.date.toISOString().slice(0, 10)),
+        customerId: quotation.customerId,
+        vehicleId: quotation.vehicleId ?? '',
+        customer: quotation.customer.name,
+        email: string(legacy.email, quotation.customer.email ?? ''),
+        phone: string(legacy.phone, quotation.customer.phone ?? ''),
+        mileage: quotation.mileageIn ?? 0,
+        vehicle: {
+          ...(isRecord(legacy.vehicle) ? legacy.vehicle : {}),
+          make: quotation.vehicle?.brand ?? string(legacy.vehicleMake),
+          model: quotation.vehicle?.model ?? string(legacy.vehicleModel),
+          year: quotation.vehicle?.year ?? number(legacy.vehicleYear),
+          plate: quotation.vehicle?.plate ?? string(legacy.vehiclePlate),
+          vin: quotation.vehicle?.vin ?? string(legacy.vehicleVin),
+        },
+        reason: quotation.reason,
+        quoteDiscountPercent: Number(quotation.discountPercent),
+        serviceOrderId: quotation.serviceOrderId ?? undefined,
+        quoteItems: quotation.items.map((line) => {
+          const lineLegacy = isRecord(line.legacyData) ? line.legacyData : {}
+          return {
+            ...lineLegacy,
+            id: string(lineLegacy.id, line.id),
+            type: string(lineLegacy.type, itemNames[line.item.type]),
+            description: string(lineLegacy.description, line.item.name),
+            reference: string(lineLegacy.reference, line.item.sku ?? ''),
+            cost: number(lineLegacy.cost, Number(line.item.cost)),
+            price: Number(line.unitPrice),
+            discount: Number(line.discount),
+            taxRate: Number(line.taxRate),
+            quantity: Number(line.quantity),
+            status: string(lineLegacy.status, 'Pendiente'),
+          }
+        }),
+      }
+    }),
     suppliers: suppliers.map((supplier) => ({
       id: supplier.id,
       type: supplier.type === SupplierType.PERSON ? 'Persona' : 'Empresa',
@@ -476,6 +534,7 @@ export async function replaceRelationalWorkshopData(
   const clients = records(data.clients, 'clients')
   const inventory = records(data.inventory, 'inventory')
   const orders = records(data.orders, 'orders')
+  const quotations = records(data.quotations, 'quotations')
   const appointments = records(data.appointments, 'appointments')
   const suppliers = records(data.suppliers, 'suppliers')
   const assets = records(data.workshopAssets, 'workshopAssets')
@@ -544,6 +603,30 @@ export async function replaceRelationalWorkshopData(
       throw Object.assign(new Error(`La orden ${orderId || '(sin id)'} debe referenciar un cliente y un vehículo existentes.`), { status: 400 })
     }
     orderLinks.set(orderId, { customerId: string(customer.id), vehicleId: string(selectedVehicle.vehicle.id) })
+  }
+  const quotationLinks = new Map<string, { customerId: string; vehicleId: string | null }>()
+  for (const quotation of quotations) {
+    const quotationId = string(quotation.id)
+    const customerId = string(quotation.customerId)
+    const vehicleId = string(quotation.vehicleId)
+    if (!quotationId || !clientById.has(customerId)) {
+      throw Object.assign(new Error(`La cotización ${quotationId || '(sin id)'} debe referenciar un cliente existente.`), { status: 400 })
+    }
+    if (vehicleId && vehicleById.get(vehicleId)?.clientId !== customerId) {
+      throw Object.assign(new Error(`El vehículo de la cotización ${quotationId} no pertenece al cliente seleccionado.`), { status: 400 })
+    }
+    const serviceOrderId = string(quotation.serviceOrderId)
+    if (serviceOrderId && string(quotation.status) !== QuoteStatus.APPROVED) {
+      throw Object.assign(new Error(`La cotización ${quotationId} debe estar aceptada antes de vincular una orden de servicio.`), { status: 400 })
+    }
+    const linkedOrders = orders.filter((order) => string(order.sourceQuoteId) === quotationId)
+    if (
+      (serviceOrderId && (linkedOrders.length !== 1 || string(linkedOrders[0].id) !== serviceOrderId)) ||
+      (!serviceOrderId && linkedOrders.length > 0)
+    ) {
+      throw Object.assign(new Error(`La cotización ${quotationId} referencia una orden de servicio inválida.`), { status: 400 })
+    }
+    quotationLinks.set(quotationId, { customerId, vehicleId: vehicleId || null })
   }
 
   const sessions: JsonRecord[] = [
@@ -633,6 +716,7 @@ export async function replaceRelationalWorkshopData(
   const serviceOrderRows: Prisma.ServiceOrderCreateManyInput[] = []
   const serviceOrderItemRows: Prisma.ServiceOrderItemCreateManyInput[] = []
   const syntheticItemRows: Prisma.ItemCreateManyInput[] = []
+  const quotationItemRows: Prisma.QuotationItemCreateManyInput[] = []
   const invoiceRows: Prisma.InvoiceCreateManyInput[] = []
   const invoiceItemRows: Prisma.InvoiceItemCreateManyInput[] = []
   const serviceOrderNumberStart = await tx.serviceOrder.count()
@@ -726,8 +810,78 @@ export async function replaceRelationalWorkshopData(
       })))
     }
   }
+  const quotationRows: Prisma.QuotationCreateManyInput[] = []
+  for (const quotation of quotations) {
+    const quotationId = string(quotation.id)
+    const link = quotationLinks.get(quotationId)!
+    const consecutiveNumber = Math.trunc(Number(string(quotation.quoteNumber)))
+    const status = quoteStatuses[string(quotation.status)]
+    if (!Number.isInteger(consecutiveNumber) || consecutiveNumber < 1 || !status) {
+      throw Object.assign(new Error(`La cotización ${quotationId} tiene un número o estado inválido.`), { status: 400 })
+    }
+    const quotationItems = records(quotation.quoteItems, `quoteItems de ${quotationId}`)
+    const discountPercent = Math.min(100, Math.max(0, number(quotation.quoteDiscountPercent)))
+    let total = 0
+    for (const [itemIndex, item] of quotationItems.entries()) {
+      const reference = string(item.reference)
+      let itemId = reference ? itemIdsByReference.get(normalized(reference)) : undefined
+      if (!itemId) {
+        itemId = `legacy-quotation-item-${quotationId}-${itemIndex + 1}`
+        syntheticItemRows.push({
+          id: itemId,
+          name: string(item.description, `Ítem legado ${itemIndex + 1}`),
+          type: itemType(item.type),
+          sku: null,
+          description: string(item.description) || null,
+          cost: new Prisma.Decimal(number(item.cost)),
+          price: new Prisma.Decimal(number(item.price)),
+          taxRate: new Prisma.Decimal(number(item.taxRate, 18)),
+          stock: new Prisma.Decimal(0),
+          isActive: false,
+        })
+      }
+      const quantity = number(item.quantity, 1)
+      const price = number(item.price)
+      const itemDiscount = Math.min(100, Math.max(0, number(item.discount)))
+      const taxRate = number(item.taxRate, 18)
+      const combinedDiscount = 1 - (1 - itemDiscount / 100) * (1 - discountPercent / 100)
+      total += price * quantity * (1 - combinedDiscount) * (1 + taxRate / 100)
+      quotationItemRows.push({
+        id: `quotation-item-${quotationId}-${itemIndex + 1}`,
+        quotationId,
+        itemId,
+        quantity: new Prisma.Decimal(quantity),
+        unitPrice: new Prisma.Decimal(price),
+        total: new Prisma.Decimal(price * quantity * (1 - itemDiscount / 100) * (1 + taxRate / 100)),
+        discount: new Prisma.Decimal(itemDiscount),
+        taxRate: new Prisma.Decimal(taxRate),
+        legacyData: without(item, ['id', 'type', 'description', 'reference', 'cost', 'price', 'discount', 'taxRate', 'quantity']),
+      })
+    }
+    const orderDate = date(quotation.dateISO ?? quotation.date)
+    quotationRows.push({
+      id: quotationId,
+      consecutiveNumber,
+      customerId: link.customerId,
+      vehicleId: link.vehicleId,
+      serviceOrderId: string(quotation.serviceOrderId) || null,
+      date: orderDate,
+      reason: string(quotation.reason),
+      mileageIn: Math.trunc(number(quotation.mileage)),
+      discountPercent: new Prisma.Decimal(discountPercent),
+      total: new Prisma.Decimal(total),
+      status,
+      legacyData: without(quotation, [
+        'id', 'quoteNumber', 'status', 'date', 'dateISO', 'customerId', 'vehicleId',
+        'customer', 'email', 'phone', 'mileage', 'vehicle', 'reason', 'quoteItems',
+        'quoteDiscountPercent', 'serviceOrderId',
+      ]),
+    })
+  }
   await tx.item.createMany({ data: syntheticItemRows })
   await tx.serviceOrder.createMany({ data: serviceOrderRows })
+  await tx.quotation.createMany({ data: quotationRows })
+  await tx.quotationItem.createMany({ data: quotationItemRows })
   await tx.serviceOrderItem.createMany({ data: serviceOrderItemRows })
   await tx.invoice.createMany({ data: invoiceRows })
   await tx.invoiceItem.createMany({ data: invoiceItemRows })

@@ -40,6 +40,28 @@ export type Order = {
   comments: string
 }
 
+export type QuotationStatus = 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
+
+export type Quotation = {
+  id: string
+  quoteNumber: string
+  status: QuotationStatus
+  date: string
+  dateISO: string
+  customerId: string
+  vehicleId: string
+  customer: string
+  email: string
+  phone: string
+  mileage: number
+  vehicle: Order['vehicle']
+  reason: string
+  quoteItems: OrderServiceItem[]
+  quoteDiscountPercent: number
+  acceptedAt?: string
+  serviceOrderId?: string
+}
+
 export type Appointment = {
   id: string
   customerId: string

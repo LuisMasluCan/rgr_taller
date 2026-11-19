@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import { DemoDataProvider } from './contexts/DemoDataProvider'
 import AppointmentsView from './views/AppointmentsView'
@@ -18,6 +18,11 @@ import ReportsView from './views/ReportsView'
 import SettingsView from './views/SettingsView'
 import SuppliersView from './views/SuppliersView'
 
+function OrderQuoteRoute({ mode }: { mode: 'quote' | 'invoice' }) {
+  const { orderId } = useParams()
+  return <OrderQuoteView key={`${mode}:${orderId}`} mode={mode} />
+}
+
 function App() {
   return (
     <DemoDataProvider>
@@ -29,9 +34,9 @@ function App() {
             <Route path="/dashboard" element={<DashboardView />} />
             <Route path="/orders" element={<OrdersView />} />
             <Route path="/appointments" element={<AppointmentsView />} />
-            <Route path="/orders/:orderId/invoice" element={<OrderQuoteView mode="invoice" />} />
+            <Route path="/orders/:orderId/invoice" element={<OrderQuoteRoute mode="invoice" />} />
             <Route path="/quotes" element={<QuotationsView />} />
-            <Route path="/quotes/:orderId" element={<OrderQuoteView mode="quote" />} />
+            <Route path="/quotes/:orderId" element={<OrderQuoteRoute mode="quote" />} />
             <Route path="/banks" element={<BanksView />} />
             <Route path="/clients" element={<ClientsView />} />
             <Route path="/suppliers" element={<SuppliersView />} />

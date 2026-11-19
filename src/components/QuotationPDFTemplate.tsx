@@ -46,7 +46,7 @@ function QuotationPDFTemplate({
         </div>
         <div className="text-right">
           <h1 className="text-xl font-extrabold uppercase tracking-wide text-blue-950">Cotización</h1>
-          <p className="mt-2 text-sm font-bold text-slate-900">N.º {order.id}</p>
+          <p className="mt-2 text-sm font-bold text-slate-900">N.º {order.quoteNumber ?? order.id}</p>
           <p className="mt-1 text-[9px] text-slate-600">Emisión: {issueDate}</p>
           <p className="text-[9px] text-slate-600">Vencimiento: {dueDate}</p>
         </div>

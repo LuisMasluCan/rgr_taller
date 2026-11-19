@@ -291,6 +291,7 @@ function OrdersView() {
     !order.invoiced &&
     !order.cancellationStatus &&
     !order.convertedToOrderId &&
+    !order.sourceQuoteId &&
     order.quoteSaved &&
     Boolean(order.quoteItems?.length) &&
     order.customer === selectedClient?.name &&

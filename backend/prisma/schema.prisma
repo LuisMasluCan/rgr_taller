@@ -153,6 +153,7 @@ model Vehicle {
   customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   serviceOrders ServiceOrder[]
   appointments  Appointment[]
+  quotations    Quotation[]
 
   @@index([customerId])
 }
@@ -221,6 +222,7 @@ model ServiceOrder {
   items             ServiceOrderItem[]
   timeEntries       TimeEntry[]
   images            Image[]
+  quotation         Quotation?
 
   @@index([customerId])
   @@index([vehicleId])
@@ -264,13 +266,21 @@ model Quotation {
   id                String          @id @default(cuid())
   consecutiveNumber Int             @unique
   customerId        String
+  vehicleId         String?
+  serviceOrderId    String?         @unique
   date              DateTime        @default(now()) @db.Timestamptz(6)
   validUntil        DateTime?       @db.Timestamptz(6)
+  reason            String          @default("")
+  mileageIn         Int?
+  discountPercent   Decimal         @default(0) @db.Decimal(5, 2)
   total             Decimal         @db.Decimal(10, 2)
   status            QuoteStatus     @default(DRAFT)
+  legacyData        Json?
   createdAt         DateTime        @default(now()) @db.Timestamptz(6)
   updatedAt         DateTime        @updatedAt @db.Timestamptz(6)
   customer          Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  vehicle           Vehicle?        @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  serviceOrder      ServiceOrder?   @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
   items             QuotationItem[]
 
   @@index([customerId])
@@ -284,6 +294,9 @@ model QuotationItem {
   quantity    Decimal   @db.Decimal(10, 2)
   unitPrice   Decimal   @db.Decimal(10, 2)
   total       Decimal   @db.Decimal(10, 2)
+  discount    Decimal   @default(0) @db.Decimal(5, 2)
+  taxRate     Decimal   @default(18) @db.Decimal(5, 2)
+  legacyData  Json?
   quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Restrict)
   item        Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
 

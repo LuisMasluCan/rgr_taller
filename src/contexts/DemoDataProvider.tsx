@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { BankAccount, BankMovement } from '../data/mockBanks'
-import type { Appointment, CashRegister, ClosedCashSession, Client, InventoryItem, Order, Supplier, WorkshopAsset, WorkshopCategory, WorkshopSettings } from '../types'
+import type { Appointment, CashRegister, ClosedCashSession, Client, InventoryItem, Order, Quotation, Supplier, WorkshopAsset, WorkshopCategory, WorkshopSettings } from '../types'
 import AdminLoginView from '../views/AdminLoginView'
 import { DemoDataContext } from './DemoDataContext'
 import type { AdminUser } from './DemoDataContext'
@@ -14,6 +14,7 @@ type WorkshopData = {
   bankAccounts: BankAccount[]
   bankMovements: Record<string, BankMovement[]>
   orders: Order[]
+  quotations: Quotation[]
   suppliers: Supplier[]
   cashRegister: CashRegister
   closedSessions: ClosedCashSession[]
@@ -110,6 +111,7 @@ function parseWorkshopData(value: unknown): WorkshopData {
     'workshopCategories',
     'bankAccounts',
     'orders',
+    'quotations',
     'suppliers',
     'closedSessions',
   ] as const
@@ -219,6 +221,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [bankMovements, setBankMovements] = useState<Record<string, BankMovement[]>>({})
   const [orders, setOrders] = useState<Order[]>([])
+  const [quotations, setQuotations] = useState<Quotation[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [cashRegister, setCashRegister] = useState<CashRegister>(null)
   const [closedSessions, setClosedSessions] = useState<ClosedCashSession[]>([])
@@ -234,6 +237,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
     setBankAccounts(data.bankAccounts)
     setBankMovements(data.bankMovements as Record<string, BankMovement[]>)
     setOrders(data.orders)
+    setQuotations(data.quotations)
     setSuppliers(data.suppliers)
     setCashRegister(data.cashRegister)
     setClosedSessions(data.closedSessions)
@@ -303,6 +307,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
     bankAccounts,
     bankMovements,
     orders,
+    quotations,
     suppliers,
     cashRegister,
     closedSessions,
@@ -411,6 +416,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
     setInventory([])
     setWorkshopAssets([])
     setOrders([])
+    setQuotations([])
     setSuppliers([])
     setBankMovements({})
     setCashRegister(null)
@@ -463,6 +469,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
         bankAccounts, setBankAccounts,
         bankMovements, setBankMovements,
         orders, setOrders,
+        quotations, setQuotations,
         suppliers, setSuppliers,
         cashRegister, setCashRegister,
         closedSessions, setClosedSessions,
