@@ -569,66 +569,75 @@ export async function replaceRelationalWorkshopData(
   await tx.category.deleteMany()
   await tx.bankAccount.deleteMany()
 
-  for (const category of categoryByName.values()) {
-    await tx.category.create({
-      data: { id: category.id, name: category.name, legacyData: category.legacy },
-    })
-  }
+  await tx.category.createMany({
+    data: [...categoryByName.values()].map((category) => ({
+      id: category.id,
+      name: category.name,
+      legacyData: category.legacy,
+    })),
+  })
+  const customerRows: Prisma.CustomerCreateManyInput[] = []
+  const vehicleRows: Prisma.VehicleCreateManyInput[] = []
   for (const client of clients) {
     const clientId = string(client.id)
-    await tx.customer.create({
-      data: {
-        id: clientId,
-        name: string(client.name),
-        email: string(client.email) || null,
-        phone: string(client.phone) || null,
-        legacyData: without(client, ['id', 'name', 'email', 'phone', 'vehicles']),
-      },
+    customerRows.push({
+      id: clientId,
+      name: string(client.name),
+      email: string(client.email) || null,
+      phone: string(client.phone) || null,
+      legacyData: without(client, ['id', 'name', 'email', 'phone', 'vehicles']),
     })
     for (const vehicle of records(client.vehicles, `vehicles de ${clientId}`)) {
       const vehicleId = string(vehicle.id)
       const plate = string(vehicle.plate) || `LEGACY-${vehicleId}`
-      await tx.vehicle.create({
-        data: {
-          id: vehicleId,
-          plate,
-          brand: string(vehicle.make),
-          model: string(vehicle.model),
-          year: Math.trunc(number(vehicle.year)) || null,
-          color: string(vehicle.color) || null,
-          vin: string(vehicle.vin) || null,
-          customerId: clientId,
-          legacyData: without(vehicle, ['id', 'make', 'model', 'year', 'plate', 'vin', 'color']),
-        },
+      vehicleRows.push({
+        id: vehicleId,
+        plate,
+        brand: string(vehicle.make),
+        model: string(vehicle.model),
+        year: Math.trunc(number(vehicle.year)) || null,
+        color: string(vehicle.color) || null,
+        vin: string(vehicle.vin) || null,
+        customerId: clientId,
+        legacyData: without(vehicle, ['id', 'make', 'model', 'year', 'plate', 'vin', 'color']),
       })
     }
   }
+  await tx.customer.createMany({ data: customerRows })
+  await tx.vehicle.createMany({ data: vehicleRows })
 
   const itemIdsByReference = new Map<string, string>()
+  const itemRows: Prisma.ItemCreateManyInput[] = []
   for (const item of inventory) {
     const id = string(item.id)
     const category = categoryByName.get(normalized(string(item.category)))
-    await tx.item.create({
-      data: {
-        id,
-        name: string(item.description),
-        type: itemType(item.type),
-        sku: string(item.reference) || null,
-        description: string(item.details) || null,
-        unit: string(item.unit, 'unidad') || 'unidad',
-        cost: new Prisma.Decimal(number(item.cost)),
-        price: new Prisma.Decimal(number(item.price)),
-        taxRate: new Prisma.Decimal(number(item.taxRate, 18)),
-        stock: new Prisma.Decimal(number(item.stock)),
-        minStock: new Prisma.Decimal(0),
-        categoryId: category?.id ?? null,
-        legacyData: without(item, ['id', 'description', 'reference', 'cost', 'price', 'taxRate', 'stock', 'unit', 'details', 'category']),
-      },
+    itemRows.push({
+      id,
+      name: string(item.description),
+      type: itemType(item.type),
+      sku: string(item.reference) || null,
+      description: string(item.details) || null,
+      unit: string(item.unit, 'unidad') || 'unidad',
+      cost: new Prisma.Decimal(number(item.cost)),
+      price: new Prisma.Decimal(number(item.price)),
+      taxRate: new Prisma.Decimal(number(item.taxRate, 18)),
+      stock: new Prisma.Decimal(number(item.stock)),
+      minStock: new Prisma.Decimal(0),
+      categoryId: category?.id ?? null,
+      legacyData: without(item, ['id', 'description', 'reference', 'cost', 'price', 'taxRate', 'stock', 'unit', 'details', 'category']),
     })
     if (string(item.reference)) itemIdsByReference.set(normalized(string(item.reference)), id)
   }
+  await tx.item.createMany({ data: itemRows })
 
-  for (const order of orders) {
+  const serviceOrderRows: Prisma.ServiceOrderCreateManyInput[] = []
+  const serviceOrderItemRows: Prisma.ServiceOrderItemCreateManyInput[] = []
+  const syntheticItemRows: Prisma.ItemCreateManyInput[] = []
+  const invoiceRows: Prisma.InvoiceCreateManyInput[] = []
+  const invoiceItemRows: Prisma.InvoiceItemCreateManyInput[] = []
+  const serviceOrderNumberStart = await tx.serviceOrder.count()
+  const invoiceNumberStart = await tx.invoice.count()
+  for (const [orderIndex, order] of orders.entries()) {
     const orderId = string(order.id)
     const link = orderLinks.get(orderId)!
     const orderDate = date(order.dateISO ?? order.date)
@@ -638,62 +647,56 @@ export async function replaceRelationalWorkshopData(
     const orderItems = records(order.quoteItems ?? [], `quoteItems de ${orderId}`)
     const lineIds: string[] = []
     const lineTotals: number[] = []
-    await tx.serviceOrder.create({
-      data: {
-        id: orderId,
-        consecutiveNumber: (await tx.serviceOrder.count()) + 1,
-        status: orderStatuses[string(order.status)] ?? ServiceStatus.RECEPTION,
-        customerId: link.customerId,
-        vehicleId: link.vehicleId,
-        receptionDate: orderDate,
-        diagnosisDate: typeof timestamps.fechaDiagnostico === 'string' ? date(timestamps.fechaDiagnostico) : null,
-        approvalDate: typeof timestamps.fechaAprobacion === 'string' ? date(timestamps.fechaAprobacion) : null,
-        repairStartDate: typeof timestamps.fechaInicioReparacion === 'string' ? date(timestamps.fechaInicioReparacion) : null,
-        deliveryDate: typeof timestamps.fechaEntrega === 'string' ? date(timestamps.fechaEntrega) : null,
-        entryReason: string(order.reason),
-        diagnosisNotes: string(diagnosis.findings) || null,
-        qcNotes: string(qualityControl.observations) || null,
-        mileageIn: Math.trunc(number(order.mileage)),
-        isFactured: order.invoiced === true,
-        legacyData: orderLegacyData(order),
-      },
+    serviceOrderRows.push({
+      id: orderId,
+      consecutiveNumber: serviceOrderNumberStart + orderIndex + 1,
+      status: orderStatuses[string(order.status)] ?? ServiceStatus.RECEPTION,
+      customerId: link.customerId,
+      vehicleId: link.vehicleId,
+      receptionDate: orderDate,
+      diagnosisDate: typeof timestamps.fechaDiagnostico === 'string' ? date(timestamps.fechaDiagnostico) : null,
+      approvalDate: typeof timestamps.fechaAprobacion === 'string' ? date(timestamps.fechaAprobacion) : null,
+      repairStartDate: typeof timestamps.fechaInicioReparacion === 'string' ? date(timestamps.fechaInicioReparacion) : null,
+      deliveryDate: typeof timestamps.fechaEntrega === 'string' ? date(timestamps.fechaEntrega) : null,
+      entryReason: string(order.reason),
+      diagnosisNotes: string(diagnosis.findings) || null,
+      qcNotes: string(qualityControl.observations) || null,
+      mileageIn: Math.trunc(number(order.mileage)),
+      isFactured: order.invoiced === true,
+      legacyData: orderLegacyData(order),
     })
     for (const [index, item] of orderItems.entries()) {
       const reference = string(item.reference)
       let itemId = reference ? itemIdsByReference.get(normalized(reference)) : undefined
       if (!itemId) {
         itemId = `legacy-item-${orderId}-${index + 1}`
-        await tx.item.create({
-          data: {
-            id: itemId,
-            name: string(item.description, `Ítem legado ${index + 1}`),
-            type: itemType(item.type),
-            sku: null,
-            description: string(item.description) || null,
-            cost: new Prisma.Decimal(number(item.cost)),
-            price: new Prisma.Decimal(number(item.price)),
-            taxRate: new Prisma.Decimal(number(item.taxRate, 18)),
-            stock: new Prisma.Decimal(0),
-            isActive: false,
-          },
+        syntheticItemRows.push({
+          id: itemId,
+          name: string(item.description, `Ítem legado ${index + 1}`),
+          type: itemType(item.type),
+          sku: null,
+          description: string(item.description) || null,
+          cost: new Prisma.Decimal(number(item.cost)),
+          price: new Prisma.Decimal(number(item.price)),
+          taxRate: new Prisma.Decimal(number(item.taxRate, 18)),
+          stock: new Prisma.Decimal(0),
+          isActive: false,
         })
       }
       const itemIdForLine = itemId
       lineIds.push(itemIdForLine)
       const base = number(item.price) * number(item.quantity, 1) * (1 - number(item.discount) / 100)
       lineTotals.push(base * (1 + number(item.taxRate, 18) / 100))
-      await tx.serviceOrderItem.create({
-        data: {
-          id: `service-item-${orderId}-${index + 1}`,
-          serviceOrderId: orderId,
-          itemId: itemIdForLine,
-          quantity: new Prisma.Decimal(number(item.quantity, 1)),
-          unitPrice: new Prisma.Decimal(number(item.price)),
-          total: new Prisma.Decimal(lineTotals[index]),
-          taxRate: new Prisma.Decimal(number(item.taxRate, 18)),
-          itemType: itemType(item.type),
-          legacyData: without(item, ['description', 'reference', 'cost', 'price', 'taxRate', 'quantity']),
-        },
+      serviceOrderItemRows.push({
+        id: `service-item-${orderId}-${index + 1}`,
+        serviceOrderId: orderId,
+        itemId: itemIdForLine,
+        quantity: new Prisma.Decimal(number(item.quantity, 1)),
+        unitPrice: new Prisma.Decimal(number(item.price)),
+        total: new Prisma.Decimal(lineTotals[index]),
+        taxRate: new Prisma.Decimal(number(item.taxRate, 18)),
+        itemType: itemType(item.type),
+        legacyData: without(item, ['description', 'reference', 'cost', 'price', 'taxRate', 'quantity']),
       })
     }
     if (order.invoiced === true) {
@@ -702,51 +705,34 @@ export async function replaceRelationalWorkshopData(
         (sum, line) => sum + number(line.price) * number(line.quantity, 1) * (1 - number(line.discount) / 100),
         0,
       )
-      await tx.invoice.create({
-        data: {
-          id: `invoice-${orderId}`,
-          consecutiveNumber: (await tx.invoice.count()) + 1,
-          customerId: link.customerId,
-          date: orderDate,
-          subtotal: new Prisma.Decimal(subtotal),
-          taxAmount: new Prisma.Decimal(total - subtotal),
-          total: new Prisma.Decimal(total),
-          status: InvoiceStatus.ISSUED,
-          paymentMethod: paymentMethods[string(order.invoicePaymentMethod)] ?? null,
-          items: {
-            create: orderItems.map((line, index) => ({
-              id: `invoice-item-${orderId}-${index + 1}`,
-              itemId: lineIds[index],
-              quantity: new Prisma.Decimal(number(line.quantity, 1)),
-              unitPrice: new Prisma.Decimal(number(line.price)),
-              total: new Prisma.Decimal(lineTotals[index]),
-            })),
-          },
-        },
+      invoiceRows.push({
+        id: `invoice-${orderId}`,
+        consecutiveNumber: invoiceNumberStart + invoiceRows.length + 1,
+        customerId: link.customerId,
+        date: orderDate,
+        subtotal: new Prisma.Decimal(subtotal),
+        taxAmount: new Prisma.Decimal(total - subtotal),
+        total: new Prisma.Decimal(total),
+        status: InvoiceStatus.ISSUED,
+        paymentMethod: paymentMethods[string(order.invoicePaymentMethod)] ?? null,
       })
-      const payments = records(order.payments ?? [], `payments de ${orderId}`)
-      for (const payment of payments) {
-        const paymentAccountType = accountLabels[string(payment.method)]
-        const account = paymentAccountType
-          ? await tx.bankAccount.findFirst({ where: { type: paymentAccountType }, orderBy: { name: 'asc' } })
-          : null
-        if (!account) continue
-        await tx.cashMovement.create({
-          data: {
-            id: `payment-${string(payment.id, randomUUID())}`,
-            bankAccountId: account.id,
-            type: MovementType.INCOME,
-            amount: new Prisma.Decimal(number(payment.amount)),
-            description: string(payment.concept) || `Pago de factura ${orderId}`,
-            userId: actorId,
-            invoiceId: `invoice-${orderId}`,
-            createdAt: date(payment.timestamp ?? payment.date, orderDate),
-          },
-        })
-      }
+      invoiceItemRows.push(...orderItems.map((line, index) => ({
+        id: `invoice-item-${orderId}-${index + 1}`,
+        invoiceId: `invoice-${orderId}`,
+        itemId: lineIds[index],
+        quantity: new Prisma.Decimal(number(line.quantity, 1)),
+        unitPrice: new Prisma.Decimal(number(line.price)),
+        total: new Prisma.Decimal(lineTotals[index]),
+      })))
     }
   }
+  await tx.item.createMany({ data: syntheticItemRows })
+  await tx.serviceOrder.createMany({ data: serviceOrderRows })
+  await tx.serviceOrderItem.createMany({ data: serviceOrderItemRows })
+  await tx.invoice.createMany({ data: invoiceRows })
+  await tx.invoiceItem.createMany({ data: invoiceItemRows })
 
+  const appointmentRows: Prisma.AppointmentCreateManyInput[] = []
   for (const appointment of appointments) {
     const appointmentId = string(appointment.id)
     const customerId = string(appointment.customerId)
@@ -754,48 +740,48 @@ export async function replaceRelationalWorkshopData(
     if (!clientById.has(customerId) || vehicleById.get(vehicleId)?.clientId !== customerId) {
       throw Object.assign(new Error(`La cita ${appointmentId} debe referenciar un cliente y un vehículo existentes.`), { status: 400 })
     }
-    await tx.appointment.create({
-      data: {
-        id: appointmentId,
-        customerId,
-        vehicleId,
-        reason: string(appointment.reason),
-        date: date(appointment.date),
-        time: string(appointment.time),
-        status: appointmentStatuses[string(appointment.status)] ?? AppointmentStatus.SCHEDULED,
-        legacyData: without(appointment, ['id', 'customerId', 'vehicleId', 'reason', 'date', 'time', 'status']),
-      },
+    appointmentRows.push({
+      id: appointmentId,
+      customerId,
+      vehicleId,
+      reason: string(appointment.reason),
+      date: date(appointment.date),
+      time: string(appointment.time),
+      status: appointmentStatuses[string(appointment.status)] ?? AppointmentStatus.SCHEDULED,
+      legacyData: without(appointment, ['id', 'customerId', 'vehicleId', 'reason', 'date', 'time', 'status']),
     })
   }
+  await tx.appointment.createMany({ data: appointmentRows })
+  const supplierRows: Prisma.SupplierCreateManyInput[] = []
   for (const supplier of suppliers) {
-    await tx.supplier.create({
-      data: {
-        id: string(supplier.id),
-        type: string(supplier.type) === 'Persona' ? SupplierType.PERSON : SupplierType.COMPANY,
-        name: string(supplier.name),
-        identification: string(supplier.identification),
-        email: string(supplier.email),
-        phone: string(supplier.phone),
-        address: string(supplier.address),
-        observations: string(supplier.observations) || null,
-        legacyData: without(supplier, ['id', 'type', 'name', 'identification', 'email', 'phone', 'address', 'observations']),
-      },
+    supplierRows.push({
+      id: string(supplier.id),
+      type: string(supplier.type) === 'Persona' ? SupplierType.PERSON : SupplierType.COMPANY,
+      name: string(supplier.name),
+      identification: string(supplier.identification),
+      email: string(supplier.email),
+      phone: string(supplier.phone),
+      address: string(supplier.address),
+      observations: string(supplier.observations) || null,
+      legacyData: without(supplier, ['id', 'type', 'name', 'identification', 'email', 'phone', 'address', 'observations']),
     })
   }
+  await tx.supplier.createMany({ data: supplierRows })
+  const assetRows: Prisma.WorkshopAssetCreateManyInput[] = []
   for (const asset of assets) {
-    await tx.workshopAsset.create({
-      data: {
-        id: string(asset.id),
-        name: string(asset.name),
-        reference: string(asset.reference),
-        description: string(asset.description),
-        value: new Prisma.Decimal(number(asset.value)),
-        quantity: new Prisma.Decimal(number(asset.quantity, 1)),
-        observations: string(asset.observations),
-        legacyData: without(asset, ['id', 'name', 'reference', 'description', 'value', 'quantity', 'observations']),
-      },
+    assetRows.push({
+      id: string(asset.id),
+      name: string(asset.name),
+      reference: string(asset.reference),
+      description: string(asset.description),
+      value: new Prisma.Decimal(number(asset.value)),
+      quantity: new Prisma.Decimal(number(asset.quantity, 1)),
+      observations: string(asset.observations),
+      legacyData: without(asset, ['id', 'name', 'reference', 'description', 'value', 'quantity', 'observations']),
     })
   }
+  await tx.workshopAsset.createMany({ data: assetRows })
+  const accountRows: Prisma.BankAccountCreateManyInput[] = []
   for (const account of accounts) {
     const accountType = string(account.type)
     const idAndName = `${string(account.id)} ${string(account.name)}`.toLocaleLowerCase()
@@ -804,16 +790,49 @@ export async function replaceRelationalWorkshopData(
       : accountType === 'Billetera' && /plin/.test(idAndName)
         ? AccountType.PLIN
         : accountLabels[accountType] ?? AccountType.TRANSFER
-    await tx.bankAccount.create({
-      data: {
-        id: string(account.id),
-        name: string(account.name),
-        type: mappedType,
-        initialBalance: new Prisma.Decimal(number(account.initialBalance)),
-        currentBalance: new Prisma.Decimal(number(account.currentBalance)),
-        legacyData: without(account, ['id', 'name', 'initialBalance', 'currentBalance']),
-      },
+    accountRows.push({
+      id: string(account.id),
+      name: string(account.name),
+      type: mappedType,
+      initialBalance: new Prisma.Decimal(number(account.initialBalance)),
+      currentBalance: new Prisma.Decimal(number(account.currentBalance)),
+      legacyData: without(account, ['id', 'name', 'initialBalance', 'currentBalance']),
     })
+  }
+  await tx.bankAccount.createMany({ data: accountRows })
+  const cashMovementRows: Prisma.CashMovementCreateManyInput[] = []
+  for (const order of orders) {
+    if (order.invoiced !== true) continue
+    const orderId = string(order.id)
+    const orderDate = date(order.dateISO ?? order.date)
+    for (const payment of records(order.payments ?? [], `payments de ${orderId}`)) {
+      const paymentAccountType = accountLabels[string(payment.method)]
+      const account = paymentAccountType
+        ? accounts
+          .filter((entry) => {
+            const accountType = string(entry.type)
+            const idAndName = `${string(entry.id)} ${string(entry.name)}`.toLocaleLowerCase()
+            const mappedType = accountType === 'Efectivo' && /usd|dólar|dolar/.test(idAndName)
+              ? AccountType.CASH_USD
+              : accountType === 'Billetera' && /plin/.test(idAndName)
+                ? AccountType.PLIN
+                : accountLabels[accountType] ?? AccountType.TRANSFER
+            return mappedType === paymentAccountType
+          })
+          .sort((left, right) => string(left.name).localeCompare(string(right.name)))[0]
+        : undefined
+      if (!account) continue
+      cashMovementRows.push({
+        id: `payment-${string(payment.id, randomUUID())}`,
+        bankAccountId: string(account.id),
+        type: MovementType.INCOME,
+        amount: new Prisma.Decimal(number(payment.amount)),
+        description: string(payment.concept) || `Pago de factura ${orderId}`,
+        userId: actorId,
+        invoiceId: `invoice-${orderId}`,
+        createdAt: date(payment.timestamp ?? payment.date, orderDate),
+      })
+    }
   }
   for (const [accountId, movements] of Object.entries(data.bankMovements)) {
     if (!accounts.some((account) => string(account.id) === accountId)) {
@@ -821,63 +840,63 @@ export async function replaceRelationalWorkshopData(
     }
     for (const movement of records(movements, `bankMovements.${accountId}`)) {
       const movementType = string(movement.type) === 'Egreso' ? MovementType.EXPENSE : MovementType.INCOME
-      await tx.cashMovement.create({
-        data: {
-          id: string(movement.id, randomUUID()),
-          bankAccountId: accountId,
-          type: movementType,
-          amount: new Prisma.Decimal(number(movement.amount)),
-          description: string(movement.concept),
-          userId: actorId,
-          createdAt: date(movement.date),
-          legacyData: without(movement, ['id', 'type', 'amount', 'concept']),
-        },
+      cashMovementRows.push({
+        id: string(movement.id, randomUUID()),
+        bankAccountId: accountId,
+        type: movementType,
+        amount: new Prisma.Decimal(number(movement.amount)),
+        description: string(movement.concept),
+        userId: actorId,
+        createdAt: date(movement.date),
+        legacyData: without(movement, ['id', 'type', 'amount', 'concept']),
       })
     }
   }
+  await tx.cashMovement.createMany({ data: cashMovementRows })
+  const cashSessionRows: Prisma.CashSessionCreateManyInput[] = []
+  const cashSessionMovementRows: Prisma.CashSessionMovementCreateManyInput[] = []
   for (const session of sessions) {
     const sessionId = string(session.id)
     const movements = records(session.movements ?? [], `movements de ${sessionId}`)
-    await tx.cashSession.create({
-      data: {
-        id: sessionId,
-        openedAt: date(session.openedAt),
-        closedAt: session.closedAt ? date(session.closedAt) : null,
-        closedBy: string(session.closedBy) || null,
-        status: session.status === 'CLOSED' ? CashSessionStatus.CLOSED : CashSessionStatus.OPEN,
-        initialAmount: new Prisma.Decimal(number(session.initialAmount)),
-        totalIncomes: new Prisma.Decimal(number(session.totalIncomes)),
-        totalExpenses: new Prisma.Decimal(number(session.totalExpenses)),
-        expectedBalance: new Prisma.Decimal(number(session.expectedBalance)),
-        actualBalance: new Prisma.Decimal(number(session.actualBalance)),
-        difference: new Prisma.Decimal(number(session.difference)),
-        initialAmountUsd: new Prisma.Decimal(number(session.initialAmountUsd)),
-        totalIncomesUsd: new Prisma.Decimal(number(session.totalIncomesUsd)),
-        totalExpensesUsd: new Prisma.Decimal(number(session.totalExpensesUsd)),
-        expectedBalanceUsd: new Prisma.Decimal(number(session.expectedBalanceUsd)),
-        actualBalanceUsd: new Prisma.Decimal(number(session.actualBalanceUsd)),
-        differenceUsd: new Prisma.Decimal(number(session.differenceUsd)),
-        openingObservations: string(session.openingObservations) || null,
-        observations: string(session.observations) || null,
-        legacyData: without(session, ['id', 'openedAt', 'closedAt', 'closedBy', 'status', 'initialAmount', 'totalIncomes', 'totalExpenses', 'expectedBalance', 'actualBalance', 'difference', 'initialAmountUsd', 'totalIncomesUsd', 'totalExpensesUsd', 'expectedBalanceUsd', 'actualBalanceUsd', 'differenceUsd', 'openingObservations', 'observations', 'movements']),
-        movements: {
-          create: movements.map((movement, index) => ({
-            id: `${sessionId}-${string(movement.id, String(index + 1))}`,
-            type: string(movement.type) === 'Egreso' ? MovementType.EXPENSE : MovementType.INCOME,
-            concept: string(movement.concept),
-            amount: new Prisma.Decimal(number(movement.amount)),
-            currency: movement.currency === 'USD' ? CashCurrency.USD : CashCurrency.PEN,
-            paymentMethod: paymentMethods[string(movement.paymentMethod)] ?? null,
-            expenseCategory: string(movement.expenseCategory) || null,
-            orderId: string(movement.orderId) || null,
-            contact: string(movement.contact) || null,
-            timestamp: date(movement.timestamp),
-            legacyData: without(movement, ['type', 'concept', 'amount', 'currency', 'paymentMethod', 'expenseCategory', 'orderId', 'contact', 'timestamp']),
-          })),
-        },
-      },
+    cashSessionRows.push({
+      id: sessionId,
+      openedAt: date(session.openedAt),
+      closedAt: session.closedAt ? date(session.closedAt) : null,
+      closedBy: string(session.closedBy) || null,
+      status: session.status === 'CLOSED' ? CashSessionStatus.CLOSED : CashSessionStatus.OPEN,
+      initialAmount: new Prisma.Decimal(number(session.initialAmount)),
+      totalIncomes: new Prisma.Decimal(number(session.totalIncomes)),
+      totalExpenses: new Prisma.Decimal(number(session.totalExpenses)),
+      expectedBalance: new Prisma.Decimal(number(session.expectedBalance)),
+      actualBalance: new Prisma.Decimal(number(session.actualBalance)),
+      difference: new Prisma.Decimal(number(session.difference)),
+      initialAmountUsd: new Prisma.Decimal(number(session.initialAmountUsd)),
+      totalIncomesUsd: new Prisma.Decimal(number(session.totalIncomesUsd)),
+      totalExpensesUsd: new Prisma.Decimal(number(session.totalExpensesUsd)),
+      expectedBalanceUsd: new Prisma.Decimal(number(session.expectedBalanceUsd)),
+      actualBalanceUsd: new Prisma.Decimal(number(session.actualBalanceUsd)),
+      differenceUsd: new Prisma.Decimal(number(session.differenceUsd)),
+      openingObservations: string(session.openingObservations) || null,
+      observations: string(session.observations) || null,
+      legacyData: without(session, ['id', 'openedAt', 'closedAt', 'closedBy', 'status', 'initialAmount', 'totalIncomes', 'totalExpenses', 'expectedBalance', 'actualBalance', 'difference', 'initialAmountUsd', 'totalIncomesUsd', 'totalExpensesUsd', 'expectedBalanceUsd', 'actualBalanceUsd', 'differenceUsd', 'openingObservations', 'observations', 'movements']),
     })
+    cashSessionMovementRows.push(...movements.map((movement, index) => ({
+      id: `${sessionId}-${string(movement.id, String(index + 1))}`,
+      sessionId,
+      type: string(movement.type) === 'Egreso' ? MovementType.EXPENSE : MovementType.INCOME,
+      concept: string(movement.concept),
+      amount: new Prisma.Decimal(number(movement.amount)),
+      currency: movement.currency === 'USD' ? CashCurrency.USD : CashCurrency.PEN,
+      paymentMethod: paymentMethods[string(movement.paymentMethod)] ?? null,
+      expenseCategory: string(movement.expenseCategory) || null,
+      orderId: string(movement.orderId) || null,
+      contact: string(movement.contact) || null,
+      timestamp: date(movement.timestamp),
+      legacyData: without(movement, ['type', 'concept', 'amount', 'currency', 'paymentMethod', 'expenseCategory', 'orderId', 'contact', 'timestamp']),
+    })))
   }
+  await tx.cashSession.createMany({ data: cashSessionRows })
+  await tx.cashSessionMovement.createMany({ data: cashSessionMovementRows })
   await tx.workshopSettings.upsert({
     where: { id: stateId },
     create: {
