@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { compare } from 'bcryptjs'
 import { Prisma, Role } from '../generated/prisma/client'
 import { prisma } from './prisma'
+import { getRelationalWorkshopData, saveRelationalWorkshopData } from './workshop-state'
 
 const frontendPort = Number(process.env.VITE_PORT ?? 5173)
 const defaultOrigins = [
@@ -18,7 +19,6 @@ const allowedOrigins = new Set(
       .filter(Boolean),
   ],
 )
-const stateId = 'workshop'
 const maximumBodyBytes = 4 * 1024 * 1024
 const maximumPhotoRequestBytes = 4.25 * 1024 * 1024
 const maximumPhotoBytes = 3 * 1024 * 1024
@@ -144,78 +144,6 @@ async function authenticatedUser(request: IncomingMessage): Promise<Authenticate
     return null
   }
   return session.user
-}
-
-async function initialWorkshopData(): Promise<Prisma.InputJsonObject> {
-  const [accounts, categories] = await Promise.all([
-    prisma.bankAccount.findMany({ orderBy: { name: 'asc' } }),
-    prisma.category.findMany({ orderBy: { name: 'asc' } }),
-  ])
-  const accountTypes: Record<string, string> = {
-    CASH_SOLES: 'Efectivo',
-    CASH_USD: 'Efectivo',
-    CREDIT_CARD: 'Tarjeta de crédito',
-    DEBIT_CARD: 'Banco',
-    TRANSFER: 'Banco',
-    YAPE: 'Billetera',
-    PLIN: 'Billetera',
-  }
-  return {
-    appointments: [],
-    clients: [],
-    inventory: [],
-    workshopAssets: [],
-    workshopCategories: categories.map((category) => ({
-      id: category.id,
-      specialty: 'Mecánica General',
-      category: category.name,
-      description: '',
-    })),
-    bankAccounts: accounts.map((account) => ({
-      id: account.id,
-      name: account.name,
-      number: account.id,
-      type: accountTypes[account.type] ?? 'Banco',
-      initialBalance: Number(account.initialBalance),
-      currentBalance: Number(account.currentBalance),
-    })),
-    bankMovements: {},
-    orders: [],
-    suppliers: [],
-    cashRegister: null,
-    closedSessions: [],
-    settings: {
-      name: 'RGR Taller',
-      phone: '',
-      email: '',
-      address: '',
-      lowStockThreshold: 5,
-      notificationsEnabled: true,
-    },
-    activeProfile: 'Sin sesión',
-  }
-}
-
-async function getOrCreateWorkshopState() {
-  const existing = await prisma.workshopState.findUnique({ where: { id: stateId } })
-  if (existing) return existing
-  const data = await initialWorkshopData()
-  try {
-    return await prisma.workshopState.create({
-      data: { id: stateId, data, version: 1 },
-    })
-  } catch (error) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'P2002'
-    ) {
-      const concurrentState = await prisma.workshopState.findUnique({ where: { id: stateId } })
-      if (concurrentState) return concurrentState
-    }
-    throw error
-  }
 }
 
 export async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -442,8 +370,8 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
         return
       }
-      const state = await getOrCreateWorkshopState()
-      sendJson(response, 200, { data: state.data, version: state.version })
+      const state = await getRelationalWorkshopData()
+      sendJson(response, 200, state)
     } catch (error) {
       console.error('Unable to load persisted workshop data:', error)
       sendJson(response, 503, { error: 'No se pudieron cargar los datos de Neon.' })
@@ -480,27 +408,26 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
         return
       }
-      const state = await getOrCreateWorkshopState()
-      if (state.version !== payload.version) {
+      const result = await saveRelationalWorkshopData(
+        payload.data,
+        payload.version as number,
+        user.id,
+      )
+      if (!result) {
+        const latest = await getRelationalWorkshopData()
         sendJson(response, 409, {
           error: 'Hay cambios de otro dispositivo; conserva esta pestaña mientras se sincronizan.',
-          version: state.version,
+          version: latest.version,
         })
         return
       }
-      const result = await prisma.workshopState.updateMany({
-        where: { id: stateId, version: payload.version as number },
-        data: { data: payload.data, version: { increment: 1 } },
-      })
-      if (result.count !== 1) {
-        sendJson(response, 409, { error: 'Hay cambios de otro dispositivo; conserva esta pestaña mientras se sincronizan.' })
-        return
-      }
-      const updated = await prisma.workshopState.findUniqueOrThrow({ where: { id: stateId } })
-      sendJson(response, 200, { version: updated.version, updatedAt: updated.updatedAt })
+      sendJson(response, 200, { version: result.version, updatedAt: new Date().toISOString() })
     } catch (error) {
       console.error('Unable to persist workshop data:', error)
-      sendJson(response, 500, { error: 'No se pudieron guardar los cambios en Neon.' })
+      const status = isRecord(error) && typeof error.status === 'number' ? error.status : 500
+      sendJson(response, status, {
+        error: status === 400 && error instanceof Error ? error.message : 'No se pudieron guardar los cambios en Neon.',
+      })
     }
     return
   }

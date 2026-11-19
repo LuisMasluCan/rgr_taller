@@ -18,6 +18,10 @@ export const prisma =
       max: 1,
       connectionTimeoutMillis: 5_000,
     }),
+    transactionOptions: {
+      maxWait: 15_000,
+      timeout: 120_000,
+    },
   })
 
 if (process.env.NODE_ENV !== 'production') {

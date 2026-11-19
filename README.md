@@ -18,7 +18,9 @@ npm run db:migrate:deploy --prefix backend
 npm run build --prefix backend
 ```
 
-Las migraciones crean las tablas `WorkshopState` (persistencia actual), `AuthSession` (sesiones) y `WorkshopPhoto` (fotografías de ingreso). Asegúrate de ejecutar `npm run db:migrate:deploy --prefix backend` al configurar la base y después de cada cambio de esquema; las fotos no se incluyen como base64 en cada sincronización del estado.
+Las migraciones crean las tablas relacionales del taller, `WorkshopDataVersion` (control optimista de concurrencia), `WorkshopSettings`, `AuthSession` (sesiones) y `WorkshopPhoto` (fotografías de ingreso). `WorkshopState` se conserva intacta como fuente para la importación legacy; la API ya no la lee ni la escribe. Asegúrate de ejecutar `npm run db:migrate:deploy --prefix backend` al configurar la base y después de cada cambio de esquema; las fotos no se incluyen como base64 en cada sincronización del estado.
+
+Las migraciones relacionales agregan tablas para clientes, vehículos, inventario, órdenes, citas, proveedores, activos y cierres de caja, además de campos JSON de compatibilidad por entidad para los campos existentes de la interfaz que no tienen columna propia. Para importar una base existente desde `WorkshopState`, primero crea un snapshot de Neon y después ejecuta `npm run db:import:relational --prefix backend`. El importador es transaccional, se detiene si ya hay datos relacionales y no elimina `WorkshopState`. No ejecutes el importador dos veces sobre la misma base.
 
 ## Desarrollo
 
@@ -33,7 +35,7 @@ Vite reenvía `/api` al servidor local en `127.0.0.1:3001`. Comprueba la conexi�
 
 ## Persistencia y alcance actual
 
-Por ahora, la API guarda las colecciones editadas por la interfaz como un snapshot JSONB versionado en `WorkshopState`. Si varios dispositivos guardan a la vez, la interfaz combina los cambios independientes y reintenta automáticamente; los registros se combinan por ID para conservar, por ejemplo, órdenes creadas en otra sesión. La interfaz muestra cuándo hay cambios en curso y advierte antes de salir si todavía no se guardaron. Las cuentas bancarias y categorías iniciales se leen de sus tablas relacionales; los cambios operativos de la interfaz todavía **no** se sincronizan con `Customer`, `Vehicle`, `ServiceOrder`, `Invoice` u otras tablas relacionales. La tabla normalizada no debe usarse aún como fuente de reportes externos.
+La API de estado lee y escribe las tablas relacionales dentro de transacciones y mantiene el contrato `WorkshopData` esperado por el frontend. Las columnas relacionales guardan los campos principales; `legacyData` conserva los campos específicos de la interfaz que no tienen columnas normalizadas. Si varios dispositivos guardan a la vez, la interfaz combina los cambios independientes y reintenta automáticamente usando la versión en `WorkshopDataVersion`. La interfaz muestra cuándo hay cambios en curso y advierte antes de salir si todavía no se guardaron.
 
 El acceso está limitado a cuentas con rol `ADMIN`; no hay registro de usuarios y la interfaz ofrece una sola cuenta operativa por ahora. El servidor almacena sesiones opacas con hash en Neon y las entrega en una cookie `HttpOnly`, `SameSite=Strict`. Las fotografías se sirven solo a sesiones autenticadas y se guardan fuera del snapshot JSON.
 

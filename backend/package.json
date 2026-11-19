@@ -15,6 +15,7 @@
     "db:seed": "prisma db seed",
     "db:seed:admin": "tsx prisma/seed-admin.ts",
     "db:set-admin-password": "tsx prisma/set-admin-password.ts",
+    "db:import:relational": "tsx prisma/import-relational.ts",
     "db:check": "ts-node prisma/check-db.ts"
   },
   "dependencies": {

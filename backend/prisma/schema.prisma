@@ -72,18 +72,39 @@ enum MovementType {
   EXPENSE
 }
 
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum SupplierType {
+  COMPANY
+  PERSON
+}
+
+enum CashCurrency {
+  PEN
+  USD
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
 model User {
-  id                    String          @id @default(cuid())
-  email                 String          @unique
-  name                  String
-  password              String
-  role                  Role            @default(TECHNICIAN)
-  createdAt             DateTime        @default(now()) @db.Timestamptz(6)
-  updatedAt             DateTime        @updatedAt @db.Timestamptz(6)
-  serviceOrders         ServiceOrder[]  @relation("AssignedTechnician")
-  timeEntries           TimeEntry[]
-  cashMovements         CashMovement[]
-  authSessions          AuthSession[]
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String
+  password      String
+  role          Role           @default(TECHNICIAN)
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+  serviceOrders ServiceOrder[] @relation("AssignedTechnician")
+  timeEntries   TimeEntry[]
+  cashMovements CashMovement[]
+  authSessions  AuthSession[]
 }
 
 model AuthSession {
@@ -99,43 +120,48 @@ model AuthSession {
 }
 
 model Customer {
-  id              String         @id @default(cuid())
-  name            String
-  documentType    String?
-  documentNumber  String?
-  email           String?
-  phone           String?
-  address         String?
-  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime       @updatedAt @db.Timestamptz(6)
-  vehicles        Vehicle[]
-  serviceOrders   ServiceOrder[]
-  quotations      Quotation[]
-  invoices        Invoice[]
+  id             String         @id @default(cuid())
+  name           String
+  documentType   String?
+  documentNumber String?
+  email          String?
+  phone          String?
+  address        String?
+  legacyData     Json?
+  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(6)
+  vehicles       Vehicle[]
+  serviceOrders  ServiceOrder[]
+  quotations     Quotation[]
+  invoices       Invoice[]
+  appointments   Appointment[]
 }
 
 model Vehicle {
-  id              String         @id @default(cuid())
-  plate           String         @unique
-  brand           String
-  model           String
-  year            Int?
-  color           String?
-  vin             String?
-  mileage         Int            @default(0)
-  customerId      String
-  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime       @updatedAt @db.Timestamptz(6)
-  customer        Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  serviceOrders   ServiceOrder[]
+  id            String         @id @default(cuid())
+  plate         String         @unique
+  brand         String
+  model         String
+  year          Int?
+  color         String?
+  vin           String?
+  mileage       Int            @default(0)
+  customerId    String
+  legacyData    Json?
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  serviceOrders ServiceOrder[]
+  appointments  Appointment[]
 
   @@index([customerId])
 }
 
 model Category {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  items     Item[]
+  id         String @id @default(cuid())
+  name       String @unique
+  legacyData Json?
+  items      Item[]
 }
 
 model Item {
@@ -152,6 +178,7 @@ model Item {
   minStock          Decimal            @default(0) @db.Decimal(10, 2)
   isActive          Boolean            @default(true)
   categoryId        String?
+  legacyData        Json?
   createdAt         DateTime           @default(now()) @db.Timestamptz(6)
   updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
   category          Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
@@ -167,32 +194,33 @@ model Item {
 }
 
 model ServiceOrder {
-  id                  String             @id @default(cuid())
-  consecutiveNumber   Int                @unique
-  status              ServiceStatus      @default(RECEPTION)
-  customerId          String
-  vehicleId           String
-  technicianId        String?
-  receptionDate       DateTime           @default(now()) @db.Timestamptz(6)
-  diagnosisDate       DateTime?          @db.Timestamptz(6)
-  approvalDate        DateTime?          @db.Timestamptz(6)
-  repairStartDate     DateTime?          @db.Timestamptz(6)
-  repairEndDate       DateTime?          @db.Timestamptz(6)
-  deliveryDate        DateTime?          @db.Timestamptz(6)
-  entryReason         String
-  diagnosisNotes      String?
-  qcNotes             String?
-  fuelLevel           Decimal?           @db.Decimal(5, 2)
-  mileageIn           Int?
-  isFactured          Boolean            @default(false)
-  createdAt           DateTime           @default(now()) @db.Timestamptz(6)
-  updatedAt           DateTime           @updatedAt @db.Timestamptz(6)
-  customer            Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  vehicle             Vehicle            @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
-  technician          User?              @relation("AssignedTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
-  items               ServiceOrderItem[]
-  timeEntries         TimeEntry[]
-  images              Image[]
+  id                String             @id @default(cuid())
+  consecutiveNumber Int                @unique
+  status            ServiceStatus      @default(RECEPTION)
+  customerId        String
+  vehicleId         String
+  technicianId      String?
+  receptionDate     DateTime           @default(now()) @db.Timestamptz(6)
+  diagnosisDate     DateTime?          @db.Timestamptz(6)
+  approvalDate      DateTime?          @db.Timestamptz(6)
+  repairStartDate   DateTime?          @db.Timestamptz(6)
+  repairEndDate     DateTime?          @db.Timestamptz(6)
+  deliveryDate      DateTime?          @db.Timestamptz(6)
+  entryReason       String
+  diagnosisNotes    String?
+  qcNotes           String?
+  fuelLevel         Decimal?           @db.Decimal(5, 2)
+  mileageIn         Int?
+  isFactured        Boolean            @default(false)
+  legacyData        Json?
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+  customer          Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  vehicle           Vehicle            @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  technician        User?              @relation("AssignedTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  items             ServiceOrderItem[]
+  timeEntries       TimeEntry[]
+  images            Image[]
 
   @@index([customerId])
   @@index([vehicleId])
@@ -201,29 +229,31 @@ model ServiceOrder {
 }
 
 model ServiceOrderItem {
-  id              String       @id @default(cuid())
-  serviceOrderId  String
-  itemId          String
-  quantity        Decimal      @db.Decimal(10, 2)
-  unitPrice       Decimal      @db.Decimal(10, 2)
-  total           Decimal      @db.Decimal(10, 2)
-  itemType        ItemType
-  serviceOrder    ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Restrict)
-  item            Item         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  itemId         String
+  quantity       Decimal      @db.Decimal(10, 2)
+  unitPrice      Decimal      @db.Decimal(10, 2)
+  total          Decimal      @db.Decimal(10, 2)
+  taxRate        Decimal      @default(18) @db.Decimal(5, 2)
+  itemType       ItemType
+  legacyData     Json?
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Restrict)
+  item           Item         @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@index([serviceOrderId])
   @@index([itemId])
 }
 
 model TimeEntry {
-  id              String       @id @default(cuid())
-  serviceOrderId  String
-  userId          String
-  startTime       DateTime     @default(now()) @db.Timestamptz(6)
-  endTime         DateTime?    @db.Timestamptz(6)
-  description     String?
-  serviceOrder    ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Restrict)
-  user            User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  userId         String
+  startTime      DateTime     @default(now()) @db.Timestamptz(6)
+  endTime        DateTime?    @db.Timestamptz(6)
+  description    String?
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Restrict)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([serviceOrderId])
   @@index([userId])
@@ -248,32 +278,32 @@ model Quotation {
 }
 
 model QuotationItem {
-  id            String    @id @default(cuid())
-  quotationId   String
-  itemId        String
-  quantity      Decimal   @db.Decimal(10, 2)
-  unitPrice     Decimal   @db.Decimal(10, 2)
-  total         Decimal   @db.Decimal(10, 2)
-  quotation     Quotation @relation(fields: [quotationId], references: [id], onDelete: Restrict)
-  item          Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  id          String    @id @default(cuid())
+  quotationId String
+  itemId      String
+  quantity    Decimal   @db.Decimal(10, 2)
+  unitPrice   Decimal   @db.Decimal(10, 2)
+  total       Decimal   @db.Decimal(10, 2)
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+  item        Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@index([quotationId])
   @@index([itemId])
 }
 
 model Invoice {
-  id                String        @id @default(cuid())
-  consecutiveNumber Int           @unique
+  id                String         @id @default(cuid())
+  consecutiveNumber Int            @unique
   customerId        String
-  date              DateTime      @default(now()) @db.Timestamptz(6)
-  subtotal          Decimal       @db.Decimal(10, 2)
-  taxAmount         Decimal       @db.Decimal(10, 2)
-  total             Decimal       @db.Decimal(10, 2)
-  status            InvoiceStatus @default(DRAFT)
+  date              DateTime       @default(now()) @db.Timestamptz(6)
+  subtotal          Decimal        @db.Decimal(10, 2)
+  taxAmount         Decimal        @db.Decimal(10, 2)
+  total             Decimal        @db.Decimal(10, 2)
+  status            InvoiceStatus  @default(DRAFT)
   paymentMethod     PaymentMethod?
-  createdAt         DateTime      @default(now()) @db.Timestamptz(6)
-  updatedAt         DateTime      @updatedAt @db.Timestamptz(6)
-  customer          Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(6)
+  customer          Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items             InvoiceItem[]
   cashMovements     CashMovement[]
 
@@ -282,44 +312,46 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id          String  @id @default(cuid())
-  invoiceId   String
-  itemId      String
-  quantity    Decimal @db.Decimal(10, 2)
-  unitPrice   Decimal @db.Decimal(10, 2)
-  total       Decimal @db.Decimal(10, 2)
-  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
-  item        Item    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  id        String  @id @default(cuid())
+  invoiceId String
+  itemId    String
+  quantity  Decimal @db.Decimal(10, 2)
+  unitPrice Decimal @db.Decimal(10, 2)
+  total     Decimal @db.Decimal(10, 2)
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  item      Item    @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@index([invoiceId])
   @@index([itemId])
 }
 
 model BankAccount {
-  id              String         @id @default(cuid())
-  name            String         @unique
-  type            AccountType
-  initialBalance  Decimal        @default(0) @db.Decimal(10, 2)
-  currentBalance  Decimal        @default(0) @db.Decimal(10, 2)
-  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime       @updatedAt @db.Timestamptz(6)
-  cashMovements   CashMovement[]
+  id             String         @id @default(cuid())
+  name           String         @unique
+  type           AccountType
+  initialBalance Decimal        @default(0) @db.Decimal(10, 2)
+  currentBalance Decimal        @default(0) @db.Decimal(10, 2)
+  legacyData     Json?
+  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(6)
+  cashMovements  CashMovement[]
 }
 
 model CashMovement {
-  id              String       @id @default(cuid())
-  bankAccountId   String
-  type            MovementType
-  amount          Decimal      @db.Decimal(10, 2)
-  description     String
-  userId          String
-  invoiceId       String?
-  itemId          String?
-  createdAt       DateTime     @default(now()) @db.Timestamptz(6)
-  bankAccount     BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
-  user            User         @relation(fields: [userId], references: [id], onDelete: Restrict)
-  invoice         Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  item            Item?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  id            String       @id @default(cuid())
+  bankAccountId String
+  type          MovementType
+  amount        Decimal      @db.Decimal(10, 2)
+  description   String
+  userId        String
+  invoiceId     String?
+  itemId        String?
+  legacyData    Json?
+  createdAt     DateTime     @default(now()) @db.Timestamptz(6)
+  bankAccount   BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  user          User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  invoice       Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  item          Item?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
 
   @@index([bankAccountId])
   @@index([userId])
@@ -329,18 +361,129 @@ model CashMovement {
 }
 
 model Image {
-  id              String        @id @default(cuid())
-  url             String
-  key             String?
-  serviceOrderId  String?
-  itemId          String?
-  createdAt       DateTime      @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime      @updatedAt @db.Timestamptz(6)
-  serviceOrder    ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
-  item            Item?         @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  id             String        @id @default(cuid())
+  url            String
+  key            String?
+  serviceOrderId String?
+  itemId         String?
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  item           Item?         @relation(fields: [itemId], references: [id], onDelete: SetNull)
 
   @@index([serviceOrderId])
   @@index([itemId])
+}
+
+model Supplier {
+  id             String       @id
+  type           SupplierType
+  name           String
+  identification String
+  email          String
+  phone          String
+  address        String
+  observations   String?
+  legacyData     Json?
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(6)
+
+  @@index([name])
+  @@index([identification])
+}
+
+model Appointment {
+  id         String            @id
+  customerId String
+  vehicleId  String
+  reason     String
+  date       DateTime          @db.Date
+  time       String
+  status     AppointmentStatus
+  legacyData Json?
+  customer   Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  vehicle    Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([customerId])
+  @@index([vehicleId])
+  @@index([date, time])
+}
+
+model WorkshopAsset {
+  id           String   @id
+  name         String
+  reference    String
+  description  String
+  value        Decimal  @db.Decimal(10, 2)
+  quantity     Decimal  @db.Decimal(10, 2)
+  observations String
+  legacyData   Json?
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([reference])
+}
+
+model CashSession {
+  id                  String                @id
+  openedAt            DateTime              @db.Timestamptz(6)
+  closedAt            DateTime?             @db.Timestamptz(6)
+  closedBy            String?
+  status              CashSessionStatus
+  initialAmount       Decimal               @db.Decimal(10, 2)
+  totalIncomes        Decimal               @default(0) @db.Decimal(10, 2)
+  totalExpenses       Decimal               @default(0) @db.Decimal(10, 2)
+  expectedBalance     Decimal               @default(0) @db.Decimal(10, 2)
+  actualBalance       Decimal               @default(0) @db.Decimal(10, 2)
+  difference          Decimal               @default(0) @db.Decimal(10, 2)
+  initialAmountUsd    Decimal               @default(0) @db.Decimal(10, 2)
+  totalIncomesUsd     Decimal               @default(0) @db.Decimal(10, 2)
+  totalExpensesUsd    Decimal               @default(0) @db.Decimal(10, 2)
+  expectedBalanceUsd  Decimal               @default(0) @db.Decimal(10, 2)
+  actualBalanceUsd    Decimal               @default(0) @db.Decimal(10, 2)
+  differenceUsd       Decimal               @default(0) @db.Decimal(10, 2)
+  openingObservations String?
+  observations        String?
+  legacyData          Json?
+  movements           CashSessionMovement[]
+
+  @@index([status, openedAt])
+}
+
+model CashSessionMovement {
+  id              String         @id
+  sessionId       String
+  type            MovementType
+  concept         String
+  amount          Decimal        @db.Decimal(10, 2)
+  currency        CashCurrency
+  paymentMethod   PaymentMethod?
+  expenseCategory String?
+  orderId         String?
+  contact         String?
+  timestamp       DateTime       @db.Timestamptz(6)
+  legacyData      Json?
+  session         CashSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+model WorkshopSettings {
+  id                    String  @id
+  name                  String
+  phone                 String
+  email                 String
+  address               String
+  lowStockThreshold     Int     @default(5)
+  notificationsEnabled  Boolean @default(true)
+  activeProfile         String  @default("Sin sesión")
+}
+
+model WorkshopDataVersion {
+  id        String   @id
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 }
 
 model WorkshopState {
