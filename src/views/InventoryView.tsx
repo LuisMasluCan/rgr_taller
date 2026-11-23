@@ -40,7 +40,7 @@ const emptyDraft = (): InventoryDraft => ({
   brand: '',
   unit: 'Unidad (und)',
   cost: '0',
-  marginPercent: '35',
+  marginPercent: '0',
   price: '0',
   taxRate: String(laborConfig.taxRate),
   stock: '0',
@@ -90,13 +90,18 @@ function InventoryView() {
           return total + (item?.cost ?? 0) * (Number(component.quantity) || 0)
         }, 0)
       : Number(next.cost) || 0
-    const price = next.type === 'Mano de Obra'
+    const taxRate = Number(next.taxRate) || 0
+    const basePrice = next.type === 'Mano de Obra'
       ? getLaborSuggestedPrice(Number(next.laborHours) || 0, next.complexity)
       : cost * (1 + (Number(next.marginPercent) || 0) / 100)
+    const finalPrice = basePrice * (1 + taxRate / 100)
     setDraft({
       ...next,
       cost: next.type === 'Servicio Compuesto' ? cost.toFixed(2) : next.cost,
-      price: price.toFixed(2),
+      price: finalPrice.toFixed(2),
+      marginPercent: next.type === 'Mano de Obra'
+        ? '0'
+        : String(Math.min(99, Math.max(0, Number(next.marginPercent) || 0))),
     })
   }
 
@@ -276,9 +281,25 @@ function InventoryView() {
 
               <Field label="Costo (sin impuesto)"><NumericInput min="0" step="0.01" value={draft.cost} readOnly={draft.type === 'Servicio Compuesto'} onChange={(value) => setDraftPrice({ ...draft, cost: value })} className={`${inputClass} ${draft.type === 'Servicio Compuesto' ? 'bg-slate-800' : ''}`} /></Field>
               <Field label="Rentabilidad (%)"><NumericInput min="0" step="0.1" value={draft.marginPercent} disabled={draft.type === 'Mano de Obra'} onChange={(value) => setDraftPrice({ ...draft, marginPercent: value })} className={`${inputClass} disabled:bg-slate-800`} /></Field>
-              <Field label="Precio de venta (sin impuesto)" required><NumericInput required min="0" step="0.01" value={draft.price} readOnly={draft.type === 'Mano de Obra'} onChange={(value) => setDraft({ ...draft, price: value })} className={`${inputClass} ${draft.type === 'Mano de Obra' ? 'bg-slate-800' : ''}`} /></Field>
-              <Field label="Impuesto"><select value={draft.taxRate} onChange={(event) => setDraft({ ...draft, taxRate: event.target.value })} className={inputClass}><option value="0">Sin impuesto</option><option value="18">IGV 18%</option></select></Field>
-              <Field label="Precio de venta final" required><NumericInput required min="0" step="0.01" value={((Number(draft.price) || 0) * (1 + (Number(draft.taxRate) || 0) / 100)).toFixed(2)} onChange={(value) => setDraft({ ...draft, price: value === '' ? '' : String(Number(value) / (1 + (Number(draft.taxRate) || 0) / 100)) })} className={`${inputClass} font-bold`} /></Field>
+              <Field label="Precio de venta (sin impuesto)" required><input required readOnly value={((Number(draft.price) || 0) / (1 + (Number(draft.taxRate) || 0) / 100)).toFixed(2)} className={`${inputClass} bg-slate-800`} /></Field>
+              <Field label="Impuesto"><select value={draft.taxRate} onChange={(event) => setDraftPrice({ ...draft, taxRate: event.target.value })} className={inputClass}><option value="0">Sin impuesto</option><option value="18">IGV 18%</option></select></Field>
+              <Field label="Precio de venta final" required><NumericInput required min="0" step="0.01" value={(Number(draft.price) || 0).toFixed(2)} onChange={(value) => {
+                const taxRate = Number(draft.taxRate) || 0
+                const finalPrice = Number(value) || 0
+                const basePrice = taxRate > 0 ? finalPrice / (1 + taxRate / 100) : finalPrice
+                const cost = draft.type === 'Servicio Compuesto'
+                  ? draft.components.reduce((total, component) => {
+                      const item = inventory.find((entry) => entry.id === component.itemId)
+                      return total + (item?.cost ?? 0) * (Number(component.quantity) || 0)
+                    }, 0)
+                  : Number(draft.cost) || 0
+                const calculatedMargin = cost > 0 ? (basePrice / cost - 1) * 100 : 0
+                setDraft({
+                  ...draft,
+                  price: finalPrice.toFixed(2),
+                  marginPercent: String(calculatedMargin > 100 ? 99 : Math.min(99, Math.max(0, calculatedMargin))),
+                })
+              }} className={`${inputClass} font-bold`} /></Field>
               {draft.type !== 'Mano de Obra' && draft.type !== 'Servicio Compuesto' && <Field label="Stock disponible"><NumericInput min="0" step="1" value={draft.stock} onChange={(value) => setDraft({ ...draft, stock: value })} className={inputClass} /></Field>}
               <Field label="Ubicación"><input value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} placeholder="Ej. Almacén A · Estante 2" className={inputClass} /></Field>
               <Field label="Descripción"><textarea value={draft.details} onChange={(event) => setDraft({ ...draft, details: event.target.value })} placeholder="Descripción adicional" rows={2} className="w-full rounded-lg border border-slate-700 px-3 py-2 text-xs outline-none focus:border-slate-700" /></Field>

@@ -182,8 +182,6 @@ function OrderQuoteView({ mode }: Props) {
   const payments = order?.payments ?? []
   const paidTotal = payments.reduce((sum, payment) => sum + payment.amount, 0)
   const pendingTotal = Math.max(0, approvedTotals.total - paidTotal)
-  const selectedTax = Number(taxRate)
-
   const updateItem = (id: string, patch: Partial<OrderServiceItem>) => {
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item))
     setQuoteDirty(true)
@@ -205,9 +203,10 @@ function OrderQuoteView({ mode }: Props) {
       description: selectedInventoryItem.description,
       reference: selectedInventoryItem.reference,
       cost: selectedInventoryItem.cost,
-      price: Number(unitPrice) || selectedInventoryItem.price,
+      price: Number(selectedInventoryItem.price.toFixed(2)),
       discount: 0,
-      taxRate: selectedTax,
+      taxRate: 0,
+      marginPercent: 0,
       quantity: 1,
       status: quotation ? 'Pendiente' : 'Aprobado',
       laborHours: selectedInventoryItem.laborHours ?? (itemType === 'Mano de obra' ? selectedInventoryItem.price / laborConfig.hourlySaleRate : undefined),
@@ -226,7 +225,7 @@ function OrderQuoteView({ mode }: Props) {
       description: '',
       reference: '',
       cost: 0,
-      marginPercent: 30,
+      marginPercent: 0,
       price: 0,
       discount: 0,
       taxRate: 0,
@@ -238,18 +237,20 @@ function OrderQuoteView({ mode }: Props) {
   }
 
   const updateItemCost = (item: OrderServiceItem, cost: number) => {
-    const marginPercent = item.marginPercent ?? (item.cost > 0 ? (item.price / item.cost - 1) * 100 : 0)
+    const calculatedMargin = item.marginPercent ?? (item.cost > 0 ? (item.price / item.cost - 1) * 100 : 0)
+    const marginPercent = calculatedMargin > 100 ? 99 : Math.min(99, Math.max(0, calculatedMargin))
     updateItem(item.id, { cost, marginPercent, price: cost * (1 + marginPercent / 100) })
   }
 
   const updateItemMargin = (item: OrderServiceItem, marginPercent: number) => {
-    updateItem(item.id, { marginPercent, price: item.cost * (1 + marginPercent / 100) })
+    updateItem(item.id, { marginPercent: Math.min(99, Math.max(0, marginPercent)), price: item.cost * (1 + Math.min(99, Math.max(0, marginPercent)) / 100) })
   }
 
   const updateItemPrice = (item: OrderServiceItem, price: number) => {
+    const calculatedMargin = item.cost > 0 ? (price / item.cost - 1) * 100 : 0
     updateItem(item.id, {
       price,
-      marginPercent: item.cost > 0 ? (price / item.cost - 1) * 100 : item.marginPercent,
+      marginPercent: calculatedMargin > 100 ? 99 : Math.min(99, Math.max(0, calculatedMargin)),
     })
   }
 
@@ -572,9 +573,9 @@ function OrderQuoteView({ mode }: Props) {
                             description: candidate.description,
                             reference: candidate.reference,
                             cost: candidate.cost,
-                            marginPercent: candidate.marginPercent ?? (candidate.cost > 0 ? (candidate.price / candidate.cost - 1) * 100 : 0),
-                            price: candidate.price,
-                            taxRate: candidate.taxRate,
+                            marginPercent: 0,
+                            price: Number(candidate.price.toFixed(2)),
+                            taxRate: 0,
                             laborHours: candidate.laborHours,
                           })
                           setActiveQuoteItemId(null)
@@ -583,7 +584,7 @@ function OrderQuoteView({ mode }: Props) {
                     })()}</div></td>
                     <td className="px-3 py-3"><input aria-label={`Referencia ${index + 1}`} value={item.reference} onChange={(event) => updateItem(item.id, { reference: event.target.value })} className="h-8 w-[105px] rounded-md border border-slate-700 px-2 font-mono text-[9px] outline-none focus:border-slate-700" /></td>
                     <td className="px-3 py-3"><NumberCell label={`Costo ${index + 1}`} value={item.cost} onChange={(value) => updateItemCost(item, value)} /></td>
-                    <td className="px-3 py-3"><NumberCell label={`Rentabilidad ${index + 1}`} value={profitability} min={1} max={100} onChange={(value) => updateItemMargin(item, value)} suffix="%" /></td>
+                    <td className="px-3 py-3"><NumberCell label={`Rentabilidad ${index + 1}`} value={profitability} min={0} max={99} onChange={(value) => updateItemMargin(item, value)} suffix="%" /></td>
                     <td className="px-3 py-3"><NumberCell label={`Valor unitario ${index + 1}`} value={item.price} onChange={(value) => updateItemPrice(item, value)} /></td>
                     <td className="px-3 py-3"><NumberCell label={`Descuento ${index + 1}`} value={item.discount} max={100} onChange={(value) => updateItem(item.id, { discount: value })} suffix="%" /></td>
                     <td className="px-3 py-3"><select aria-label={`Impuesto ${index + 1}`} value={item.taxRate} onChange={(event) => updateItem(item.id, { taxRate: Number(event.target.value) })} className="h-8 w-[105px] rounded-md border border-slate-700 bg-slate-900 px-2 text-[9px]"><option value="0">Sin impuesto</option><option value="18">IGV 18%</option></select></td>
@@ -611,7 +612,7 @@ function OrderQuoteView({ mode }: Props) {
         </div>
         <div className="grid gap-3 sm:grid-cols-[minmax(190px,1.4fr)_minmax(130px,.7fr)_minmax(130px,.7fr)_auto]">
           <div className="relative"><label htmlFor="quote-item-search" className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Buscar ítem</label><div className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input id="quote-item-search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedInventoryItemId('') }} placeholder="Nombre o referencia..." className="h-10 w-full rounded-lg border border-slate-700 pl-9 pr-3 text-xs outline-none focus:border-slate-700" /></div>
-            {query && <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-lg">{suggestions.map((item) => <button key={item.id} onClick={() => { setSelectedInventoryItemId(item.id); setQuery(item.description); setUnitPrice(String(item.price)); setTaxRate(String(item.taxRate)) }} className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-slate-800"><span><span className="block text-xs font-semibold text-slate-200">{item.description}</span><span className="text-[10px] text-slate-400">{item.reference} · Stock: {item.stock}</span></span><span className="text-xs font-semibold">{currency.format(item.price)}</span></button>)}</div>}
+            {query && <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-lg">{suggestions.map((item) => <button key={item.id} onClick={() => { setSelectedInventoryItemId(item.id); setQuery(item.description); setUnitPrice(item.price.toFixed(2)); setTaxRate('0') }} className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-slate-800"><span><span className="block text-xs font-semibold text-slate-200">{item.description}</span><span className="text-[10px] text-slate-400">{item.reference} · Stock: {item.stock}</span></span><span className="text-xs font-semibold">{currency.format(item.price)}</span></button>)}</div>}
           </div>
           <label><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Base imponible</span><div className="relative"><select value={taxRate} onChange={(event) => setTaxRate(event.target.value)} className="h-10 w-full appearance-none rounded-lg border border-slate-700 bg-slate-900 px-3 pr-8 text-xs"><option value="0">Sin impuesto</option><option value="18">IGV 18%</option></select><ChevronDown size={13} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" /></div></label>
           <label><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Precio unitario</span><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">S/</span><NumericInput min="0" step="0.01" value={unitPrice} onChange={setUnitPrice} placeholder="0.00" className="h-10 w-full rounded-lg border border-slate-700 pl-9 pr-3 text-xs outline-none focus:border-slate-700" /></div></label>

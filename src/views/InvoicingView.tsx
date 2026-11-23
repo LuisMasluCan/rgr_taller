@@ -116,9 +116,9 @@ function InvoicingView() {
         description: selectedItem.description,
         reference: selectedItem.reference,
         cost: selectedItem.cost,
-        price: Number(unitPrice) || selectedItem.price,
+        price: Number(selectedItem.price.toFixed(2)),
         discount: 0,
-        taxRate: Number(newTaxRate),
+        taxRate: 0,
         quantity: 1,
       },
     ])

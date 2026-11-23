@@ -723,10 +723,10 @@ function OrdersView() {
             description: selectedOrderItem.description,
             reference: selectedOrderItem.reference,
             cost: selectedOrderItem.cost,
-            marginPercent: selectedOrderItem.marginPercent,
-            price: selectedOrderItem.price,
+            marginPercent: 0,
+            price: Number(selectedOrderItem.price.toFixed(2)),
             discount: 0,
-            taxRate: selectedOrderItem.taxRate,
+            taxRate: 0,
             quantity,
             status: 'Pendiente',
             laborHours: selectedOrderItem.laborHours,
@@ -755,7 +755,7 @@ function OrdersView() {
             description: '',
             reference: '',
             cost: 0,
-            marginPercent: 30,
+            marginPercent: 0,
             price: 0,
             discount: 0,
             taxRate: 0,
@@ -774,14 +774,21 @@ function OrdersView() {
           quoteItems: (order.quoteItems ?? []).map((item) => {
             if (item.id !== itemId) return item
             const updated = { ...item, ...patch }
-            if ('cost' in patch && !('price' in patch)) {
-              const margin = item.marginPercent ?? (item.cost > 0 ? (item.price / item.cost - 1) * 100 : 30)
+            if ('marginPercent' in patch && 'price' in patch) {
+              updated.marginPercent = Math.min(99, Math.max(0, updated.marginPercent ?? 0))
+              updated.price = Number(updated.price.toFixed(2))
+            } else if ('cost' in patch && !('price' in patch)) {
+              const calculatedMargin = item.marginPercent ?? (item.cost > 0 ? (item.price / item.cost - 1) * 100 : 0)
+              const margin = calculatedMargin > 100 ? 99 : Math.min(99, Math.max(0, calculatedMargin))
               updated.marginPercent = margin
               updated.price = updated.cost * (1 + margin / 100)
             } else if ('marginPercent' in patch) {
-              updated.price = updated.cost * (1 + (updated.marginPercent ?? 0) / 100)
+              const margin = Math.min(99, Math.max(0, updated.marginPercent ?? 0))
+              updated.marginPercent = margin
+              updated.price = updated.cost * (1 + margin / 100)
             } else if ('price' in patch) {
-              updated.marginPercent = updated.cost > 0 ? (updated.price / updated.cost - 1) * 100 : 0
+              const calculatedMargin = updated.cost > 0 ? (updated.price / updated.cost - 1) * 100 : 0
+              updated.marginPercent = calculatedMargin > 100 ? 99 : Math.min(99, Math.max(0, calculatedMargin))
             }
             return updated
           }),
@@ -1287,9 +1294,9 @@ function OrdersView() {
                           description: candidate.description,
                           reference: candidate.reference,
                           cost: candidate.cost,
-                          marginPercent: candidate.marginPercent ?? (candidate.cost > 0 ? (candidate.price / candidate.cost - 1) * 100 : 0),
-                          price: candidate.price,
-                          taxRate: candidate.taxRate,
+                          marginPercent: 0,
+                          price: Number(candidate.price.toFixed(2)),
+                          taxRate: 0,
                           laborHours: candidate.laborHours,
                           })
                           setActiveOrderItemDescriptionId(null)
@@ -1298,7 +1305,7 @@ function OrdersView() {
                     })()}</div></td>
                     <td className="px-2 py-2"><input aria-label={`Referencia de ítem ${index + 1}`} disabled={!canEditOrderItems} value={item.reference} onChange={(event) => updateOrderItem(item.id, { reference: event.target.value })} placeholder="Referencia" className={`${inputClass} min-w-[120px]`} /></td>
                     <td className="px-2 py-2"><NumericInput aria-label={`Costo de ítem ${index + 1}`} disabled={!canEditOrderItems} min="0" step="0.01" value={item.cost} onChange={(value) => updateOrderItem(item.id, { cost: Number(value) || 0 })} className={`${inputClass} min-w-[95px]`} /></td>
-                    <td className="px-2 py-2"><NumericInput aria-label={`Rentabilidad de ítem ${index + 1}`} disabled={!canEditOrderItems} min="1" max="100" step="1" value={margin} onChange={(value) => updateOrderItem(item.id, { marginPercent: Math.min(100, Math.max(1, Number(value) || 1)) })} className={`${inputClass} min-w-[76px]`} /></td>
+                    <td className="px-2 py-2"><NumericInput aria-label={`Rentabilidad de ítem ${index + 1}`} disabled={!canEditOrderItems} min="0" max="99" step="1" value={margin} onChange={(value) => updateOrderItem(item.id, { marginPercent: Math.min(99, Math.max(0, Number(value) || 0)) })} className={`${inputClass} min-w-[76px]`} /></td>
                     <td className="px-2 py-2"><NumericInput aria-label={`Precio unitario de ítem ${index + 1}`} disabled={!canEditOrderItems} min="0" step="0.01" value={item.price} onChange={(value) => updateOrderItem(item.id, { price: Number(value) || 0 })} className={`${inputClass} min-w-[105px]`} /></td>
                     <td className="px-2 py-2"><NumericInput aria-label={`Descuento de ítem ${index + 1}`} disabled={!canEditOrderItems} min="0" max="100" step="0.01" value={item.discount} onChange={(value) => updateOrderItem(item.id, { discount: Math.min(100, Math.max(0, Number(value) || 0)) })} className={`${inputClass} min-w-[76px]`} /></td>
                     <td className="px-2 py-2"><select aria-label={`Impuesto de ítem ${index + 1}`} disabled={!canEditOrderItems} value={item.taxRate} onChange={(event) => updateOrderItem(item.id, { taxRate: Number(event.target.value) })} className={`${inputClass} min-w-[115px]`}><option value="0">Sin impuesto</option><option value="18">IGV 18%</option></select><span className="mt-1 block text-right text-[9px] text-lime-300">S/ {tax.toFixed(2)}</span></td>
