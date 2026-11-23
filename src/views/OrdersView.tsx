@@ -218,6 +218,7 @@ function OrdersView() {
   const [orderSubmitting, setOrderSubmitting] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [draft, setDraft] = useState<OrderDraft>(blankDraft())
+  const [orderClientSearch, setOrderClientSearch] = useState('')
   const [photoError, setPhotoError] = useState('')
   const [photosProcessing, setPhotosProcessing] = useState(false)
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
@@ -268,6 +269,7 @@ function OrdersView() {
     setOrderSubmitting(false)
     setEditingOrderId(null)
     setDraft(blankDraft())
+    setOrderClientSearch('')
     setPhotoError('')
     setModalOpen(true)
   }
@@ -286,6 +288,15 @@ function OrdersView() {
   const selectedClient = clients.find((client) => client.id === draft.customerId)
   const availableVehicles = selectedClient?.vehicles ?? []
   const selectedVehicle = availableVehicles.find((vehicle) => vehicle.id === draft.vehicleId)
+  const orderClientSuggestions = useMemo(() => {
+    const query = orderClientSearch.trim().toLowerCase()
+    if (!query || selectedClient) return []
+    return clients.filter((client) =>
+      `${client.name} ${client.vehicles.map((vehicle) => vehicle.plate).join(' ')}`
+        .toLowerCase()
+        .includes(query),
+    )
+  }, [clients, orderClientSearch, selectedClient])
   const availableQuotations = orders.filter((order) =>
     !editingOrderId &&
     !order.invoiced &&
@@ -353,6 +364,7 @@ function OrdersView() {
     setOrderSubmitting(false)
     const client = clients.find((entry) => entry.name === order.customer)
     const vehicle = client?.vehicles.find((entry) => entry.plate === order.vehicle.plate)
+    setOrderClientSearch(client ? `${client.name} · ${client.vehicles.map((entry) => entry.plate).join(', ')}` : '')
     setEditingOrderId(order.id)
     setDraft({
       customerId: client?.id ?? '',
@@ -1386,7 +1398,45 @@ function OrdersView() {
               <button type="button" aria-label="Cerrar" onClick={() => setModalOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800"><X size={18} /></button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Cliente</span><select required value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value, vehicleId: '', quotationId: '' })} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs outline-none focus:border-slate-700"><option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name} · {client.id}</option>)}</select></label>
+              <div className="relative">
+                <label className="block">
+                  <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Cliente</span>
+                  <div className="relative">
+                    <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      required
+                      value={orderClientSearch}
+                      onChange={(event) => {
+                        setOrderClientSearch(event.target.value)
+                        setDraft({ ...draft, customerId: '', vehicleId: '', quotationId: '' })
+                      }}
+                      placeholder="Escribe el nombre o la placa"
+                      autoComplete="off"
+                      className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 pl-9 pr-3 text-xs outline-none focus:border-slate-700"
+                    />
+                  </div>
+                </label>
+                {orderClientSuggestions.length > 0 && (
+                  <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl">
+                    {orderClientSuggestions.map((client) => (
+                      <button
+                        type="button"
+                        key={client.id}
+                        onClick={() => {
+                          setDraft({ ...draft, customerId: client.id, vehicleId: '', quotationId: '' })
+                          setOrderClientSearch(`${client.name} · ${client.vehicles.map((vehicle) => vehicle.plate).join(', ')}`)
+                        }}
+                        className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-slate-800"
+                      >
+                        <span className="text-xs font-semibold text-slate-200">{client.name}</span>
+                        <span className="text-[10px] text-slate-400">
+                          {client.vehicles.map((vehicle) => vehicle.plate).join(' · ')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <label><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Vehículo</span><select required disabled={!draft.customerId || !availableVehicles.length} value={draft.vehicleId} onChange={(event) => setDraft({ ...draft, vehicleId: event.target.value, quotationId: '' })} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs outline-none focus:border-slate-700 disabled:bg-slate-800"><option value="">{availableVehicles.length ? 'Selecciona un vehículo' : 'Primero agrega un vehículo al cliente'}</option>{availableVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.make} {vehicle.model} · {vehicle.plate}</option>)}</select></label>
               <div className="sm:col-span-2">
                 <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Importar cotización aceptada (opcional)</span><select disabled={!selectedVehicle || !availableQuotations.length} value={draft.quotationId} onChange={(event) => setDraft({ ...draft, quotationId: event.target.value })} className="h-10 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs outline-none focus:border-slate-700 disabled:bg-slate-800"><option value="">{!selectedVehicle ? 'Selecciona cliente y vehículo primero' : availableQuotations.length ? 'Crear orden sin importar cotización' : 'No hay cotizaciones guardadas para este vehículo'}</option>{availableQuotations.map((quotation) => <option key={quotation.id} value={quotation.id}>#{quotation.id} · {quotation.date} · {quotation.quoteItems?.length ?? 0} ítems · {quotation.reason}</option>)}</select></label>

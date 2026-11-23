@@ -1,4 +1,4 @@
-import { FileStack, Plus, Printer, SquarePen, Trash2, X } from 'lucide-react'
+import { FileStack, Plus, Printer, Search, SquarePen, Trash2, X } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ActionConfirmModal, { type ActionConfirmation } from '../components/ActionConfirmModal'
@@ -53,6 +53,7 @@ function QuotationsView() {
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [clientId, setClientId] = useState('')
+  const [clientSearch, setClientSearch] = useState('')
   const [vehicleId, setVehicleId] = useState('')
   const [reason, setReason] = useState('')
   const [mileage, setMileage] = useState('')
@@ -65,6 +66,15 @@ function QuotationsView() {
   const selectedClient = clients.find((client) => client.id === clientId)
   const availableClients = clients.filter((client) => client.vehicles.length > 0)
   const availableVehicles = selectedClient?.vehicles ?? []
+  const clientSuggestions = useMemo(() => {
+    const query = clientSearch.trim().toLowerCase()
+    if (!query || selectedClient) return []
+    return availableClients.filter((client) =>
+      `${client.name} ${client.vehicles.map((vehicle) => vehicle.plate).join(' ')}`
+        .toLowerCase()
+        .includes(query),
+    )
+  }, [availableClients, clientSearch, selectedClient])
 
   const savedQuotes = useMemo(() => {
     const newQuotes: QuoteRow[] = quotations.map((quote) => ({
@@ -103,6 +113,7 @@ function QuotationsView() {
 
   const openCreateQuotation = () => {
     setClientId('')
+    setClientSearch('')
     setVehicleId('')
     setReason('')
     setMileage('')
@@ -248,7 +259,47 @@ function QuotationsView() {
         <form onSubmit={createQuotation} className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl sm:p-6">
           <div className="mb-5 flex items-center justify-between"><h2 id="create-quote-title" className="text-base font-bold text-white">Crear cotización</h2><button type="button" aria-label="Cerrar" onClick={() => setCreateOpen(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800"><X size={18} /></button></div>
           {availableClients.length > 0 ? <div className="space-y-3">
-            <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Cliente</span><select required value={clientId} onChange={(event) => { setClientId(event.target.value); setVehicleId('') }} className="h-10 w-full rounded-lg border border-slate-700 bg-[#0B1120] px-3 text-xs text-white outline-none focus:border-lime-400"><option value="">Selecciona un cliente</option>{availableClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+            <div className="relative">
+              <label className="block">
+                <span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Cliente</span>
+                <div className="relative">
+                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    required
+                    value={clientSearch}
+                    onChange={(event) => {
+                      setClientSearch(event.target.value)
+                      setClientId('')
+                      setVehicleId('')
+                    }}
+                    placeholder="Escribe el nombre o la placa"
+                    autoComplete="off"
+                    className="h-10 w-full rounded-lg border border-slate-700 bg-[#0B1120] pl-9 pr-3 text-xs text-white outline-none focus:border-lime-400"
+                  />
+                </div>
+              </label>
+              {clientSuggestions.length > 0 && (
+                <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl">
+                  {clientSuggestions.map((client) => (
+                    <button
+                      type="button"
+                      key={client.id}
+                      onClick={() => {
+                        setClientId(client.id)
+                        setVehicleId('')
+                        setClientSearch(`${client.name} · ${client.vehicles.map((vehicle) => vehicle.plate).join(', ')}`)
+                      }}
+                      className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-slate-800"
+                    >
+                      <span className="text-xs font-semibold text-slate-100">{client.name}</span>
+                      <span className="text-[10px] text-slate-400">
+                        {client.vehicles.map((vehicle) => vehicle.plate).join(' · ')}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Vehículo</span><select required value={vehicleId} onChange={(event) => setVehicleId(event.target.value)} disabled={!selectedClient} className="h-10 w-full rounded-lg border border-slate-700 bg-[#0B1120] px-3 text-xs text-white outline-none focus:border-lime-400 disabled:bg-slate-800"><option value="">Selecciona un vehículo</option>{availableVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.make} {vehicle.model} {vehicle.year} · {vehicle.plate}</option>)}</select></label>
             <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Motivo / descripción</span><textarea required value={reason} onChange={(event) => setReason(event.target.value)} rows={2} placeholder="Describe brevemente el servicio a cotizar" className="w-full resize-y rounded-lg border border-slate-700 bg-[#0B1120] px-3 py-2.5 text-xs text-white outline-none focus:border-lime-400" /></label>
             <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase text-slate-400">Kilometraje actual</span><NumericInput required min="0" step="1" value={mileage} onChange={setMileage} placeholder="Ej. 28450" className="h-10 w-full rounded-lg border border-slate-700 bg-[#0B1120] px-3 text-xs text-white outline-none focus:border-lime-400" /></label>
