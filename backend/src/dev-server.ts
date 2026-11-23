@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import path from 'node:path'
 import dotenv from 'dotenv'
 
+dotenv.config({ path: path.resolve(process.cwd(), '.env') })
 dotenv.config({ path: path.resolve(process.cwd(), '..', '.env') })
 
 async function startServer(): Promise<void> {

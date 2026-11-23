@@ -34,6 +34,7 @@ import { orderStages } from '../data/orderStages'
 import { elapsedMinutes, formatDuration, orderWorkshopMinutes } from '../data/mockReports'
 import type { CashMovement, Order, OrderPhoto, OrderQualityControl, OrderServiceItem, Payment } from '../types'
 import { calculateOrderTotals } from '../utils/orderTotals'
+import {UploadDropzone} from "../shared/uploadthing";
 
 type OrderDraft = {
   customerId: string
@@ -80,7 +81,7 @@ const blankDraft = (): OrderDraft => ({
 })
 
 const maxArrivalPhotos = 10
-const maxPhotoSize = 12 * 1024 * 1024
+//const maxPhotoSize = 12 * 1024 * 1024
 const maxOptimizedPhotoSize = 480 * 1024
 const currency = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 2 })
 const cashPaymentMethodByLabel: Record<string, NonNullable<CashMovement['paymentMethod']>> = {
@@ -134,76 +135,6 @@ const statusTimestampKeys: Record<string, 'fechaIngreso' | 'fechaDiagnostico' | 
   Archivados: 'fechaArchivado',
 }
 
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') resolve(reader.result)
-      else reject(new Error(`No se pudo leer la fotografía ${file.name}.`))
-    }
-    reader.onerror = () => reject(new Error(`No se pudo leer la fotografía ${file.name}.`))
-    reader.readAsDataURL(file)
-  })
-}
-
-async function optimizePhoto(file: File): Promise<OrderPhoto> {
-  if (!file.type.startsWith('image/')) throw new Error(`${file.name} no es una imagen válida.`)
-  if (file.size > maxPhotoSize) throw new Error(`${file.name} supera el límite de 12 MB.`)
-
-  const source = await readAsDataUrl(file)
-  const image = new Image()
-  image.src = source
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve()
-    image.onerror = () => reject(new Error(`No se pudo procesar la fotografía ${file.name}.`))
-  })
-
-  const canvas = document.createElement('canvas')
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('El navegador no pudo preparar la fotografía.')
-
-  let scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight))
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
-    context.drawImage(image, 0, 0, canvas.width, canvas.height)
-    for (const quality of [0.78, 0.68, 0.58, 0.48]) {
-      const dataUrl = canvas.toDataURL('image/jpeg', quality)
-      const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
-      const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0
-      if (Math.floor(base64.length * 3 / 4) - padding <= maxOptimizedPhotoSize) {
-        return { name: file.name, dataUrl }
-      }
-    }
-    scale *= 0.8
-  }
-  throw new Error(`No se pudo reducir ${file.name} al tamaño permitido.`)
-}
-
-async function savePhoto(photo: OrderPhoto): Promise<OrderPhoto> {
-  const response = await fetch('/api/photos', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(photo),
-  })
-  let result: unknown
-  try {
-    result = await response.json()
-  } catch {
-    throw new Error(`No se pudo guardar ${photo.name}: la API devolvió una respuesta inválida.`)
-  }
-  if (!response.ok) {
-    const message = typeof result === 'object' && result !== null && 'error' in result && typeof result.error === 'string'
-      ? result.error
-      : `La API respondió con el estado ${response.status}.`
-    throw new Error(`No se pudo guardar ${photo.name}: ${message}`)
-  }
-  if (typeof result !== 'object' || result === null || !('dataUrl' in result) || typeof result.dataUrl !== 'string') {
-    throw new Error(`No se pudo guardar ${photo.name}: la API devolvió datos inválidos.`)
-  }
-  return { name: photo.name, dataUrl: result.dataUrl }
-}
-
 function OrdersView() {
   const { orders, setOrders, clients, inventory, settings, cashRegister, setCashRegister } = useDemoData()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -219,7 +150,7 @@ function OrdersView() {
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [draft, setDraft] = useState<OrderDraft>(blankDraft())
   const [photoError, setPhotoError] = useState('')
-  const [photosProcessing, setPhotosProcessing] = useState(false)
+  //const [photosProcessing, setPhotosProcessing] = useState(false)
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
   const [itemOrderId, setItemOrderId] = useState<string | null>(null)
   const [whatsAppOrderId, setWhatsAppOrderId] = useState<string | null>(null)
@@ -484,7 +415,7 @@ function OrdersView() {
     setQualityOrderId(null)
   }
 
-  const handlePhotoSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+ /* const handlePhotoSelection = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
     if (!files.length) return
@@ -508,11 +439,11 @@ function OrdersView() {
     } finally {
       setPhotosProcessing(false)
     }
-  }
+  }*/
 
   const saveOrder = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!selectedClient || photosProcessing || orderSubmissionStarted.current) return
+    if (!selectedClient || orderSubmissionStarted.current) return
     const selectedVehicle = selectedClient.vehicles.find((vehicle) => vehicle.id === draft.vehicleId)
     if (!selectedVehicle) return
     const mileage = Number(draft.mileage)
@@ -520,7 +451,8 @@ function OrdersView() {
     orderSubmissionStarted.current = true
     setOrderSubmitting(true)
 
-    const arrivalPhotos: OrderPhoto[] = []
+    const arrivalPhotos: OrderPhoto[] = draft.arrivalPhotos
+    /*const arrivalPhotos: OrderPhoto[] = []
     try {
       for (const photo of draft.arrivalPhotos) {
         arrivalPhotos.push(photo.dataUrl.startsWith('data:image/') ? await savePhoto(photo) : photo)
@@ -530,7 +462,7 @@ function OrdersView() {
       setOrderSubmitting(false)
       setPhotoError(error instanceof Error ? error.message : 'No se pudieron guardar las fotografías.')
       return
-    }
+    }*/
 
     const existing = orders.find((order) => order.id === editingOrderId)
     const changedAt = currentTimestamp()
@@ -1399,21 +1331,89 @@ function OrdersView() {
               <label><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Técnico asignado</span><input required value={draft.technician} onChange={(event) => setDraft({ ...draft, technician: event.target.value })} placeholder="Nombre del técnico" className="h-10 w-full rounded-lg border border-slate-700 px-3 text-xs outline-none placeholder:text-slate-400 focus:border-slate-700" /></label>
               <label><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Comentarios</span><input value={draft.comments} onChange={(event) => setDraft({ ...draft, comments: event.target.value })} placeholder="Notas adicionales (opcional)" className="h-10 w-full rounded-lg border border-slate-700 px-3 text-xs outline-none placeholder:text-slate-400 focus:border-slate-700" /></label>
               <div className="sm:col-span-2">
-                <div className="mb-1.5 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Fotografías de ingreso</span><span className="text-[10px] text-slate-400">{draft.arrivalPhotos.length}/{maxArrivalPhotos}</span></div>
-                <label className={`flex min-h-[88px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-700 bg-slate-800 px-4 py-3 text-center transition hover:border-slate-700 hover:bg-slate-800 ${draft.arrivalPhotos.length >= maxArrivalPhotos || photosProcessing ? 'pointer-events-none opacity-50' : ''}`}>
-                  <input aria-label="Subir fotografías de ingreso" type="file" accept="image/*" multiple disabled={draft.arrivalPhotos.length >= maxArrivalPhotos || photosProcessing} onChange={handlePhotoSelection} className="sr-only" />
-                  <Camera size={18} className="text-slate-400" />
-                  <span className="text-xs font-semibold text-slate-300">{photosProcessing ? 'Preparando fotografías…' : 'Selecciona o toma fotos de la unidad'}</span>
-                  <span className="text-[10px] text-slate-400">Imágenes · máximo {maxArrivalPhotos} fotos · 12 MB por archivo. Se comprimen y guardan en Neon.</span>
-                </label>
-                {photoError && <p role="alert" className="mt-2 text-[11px] font-medium text-red-300">{photoError}</p>}
-                {draft.arrivalPhotos.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{draft.arrivalPhotos.map((photo, index) => <div key={`${photo.name}-${index}`} className="group relative overflow-hidden rounded-lg border border-slate-700"><img src={photo.dataUrl} alt={`Foto de ingreso: ${photo.name}`} className="h-24 w-full object-cover" /><span className="block truncate px-2 py-1 text-[9px] text-slate-400">{photo.name}</span><button type="button" aria-label={`Quitar foto ${photo.name}`} onClick={() => setDraft((current) => ({ ...current, arrivalPhotos: current.arrivalPhotos.filter((_, photoIndex) => photoIndex !== index) }))} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900/90 text-red-300 shadow hover:bg-slate-900"><Trash2 size={12} /></button></div>)}</div>}
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    Fotografías de ingreso
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    {draft.arrivalPhotos.length}/{maxArrivalPhotos}
+                  </span>
+                </div>
+
+                {draft.arrivalPhotos.length < maxArrivalPhotos && (
+                  <UploadDropzone
+                    className="border-dashed border-slate-700 bg-slate-950/60 py-3 text-white ut-label:text-xs"
+                    endpoint="imageUploader"
+                    config={{ mode: "auto" }}
+                    content={{
+                      allowedContent() {
+                        return "Imágenes hasta 4MB"
+                      },
+                      label() {
+                        return "Arrastra fotos o haz clic para subir"
+                      },
+                    }}
+                    onClientUploadComplete={(res) => {
+                      if (res) {
+                        const newPhotos = res.map((file) => ({
+                          name: file.name,
+                          dataUrl: file.url,
+                          key: file.key,
+                        }))
+                        setDraft((current) => ({
+                          ...current,
+                          arrivalPhotos: [...current.arrivalPhotos, ...newPhotos].slice(0, maxArrivalPhotos),
+                        }))
+                        setPhotoError('')
+                      }
+                    }}
+                    onUploadError={(error: Error) => {
+                      setPhotoError(error.message)
+                    }}
+                  />
+                )}
+
+                {photoError && (
+                  <p role="alert" className="mt-2 text-[11px] font-medium text-red-300">
+                    {photoError}
+                  </p>
+                )}
+
+                {draft.arrivalPhotos.length > 0 && (
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {draft.arrivalPhotos.map((photo, index) => (
+                      <div key={`${photo.name}-${index}`} className="group relative overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+                        <img
+                          src={photo.dataUrl}
+                          alt={`Foto de ingreso: ${photo.name}`}
+                          className="h-24 w-full object-cover"
+                        />
+                        <span className="block truncate px-2 py-1 text-[9px] text-slate-400">
+                          {photo.name}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Quitar foto ${photo.name}`}
+                          onClick={() =>
+                            setDraft((current) => ({
+                              ...current,
+                              arrivalPhotos: current.arrivalPhotos.filter((_, photoIndex) => photoIndex !== index),
+                            }))
+                          }
+                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900/90 text-red-300 shadow hover:bg-slate-900"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             {draft.customerId && !availableVehicles.length && <p className="mt-3 text-[11px] text-orange-200">Este cliente todavía no tiene vehículos. Agrégalo desde el módulo Clientes antes de crear la orden.</p>}
             <div className="mt-5 flex justify-end gap-2 border-t border-slate-800 pt-4">
               <button type="button" onClick={() => setModalOpen(false)} className="rounded-lg border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:bg-slate-800">Cancelar</button>
-              <button type="submit" disabled={!availableVehicles.length || photosProcessing || orderSubmitting} className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-lime-400 disabled:cursor-not-allowed disabled:opacity-50">{editingOrderId ? 'Guardar cambios' : 'Crear orden'}</button>
+              <button type="submit" disabled={!availableVehicles.length || orderSubmitting} className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-lime-400 disabled:cursor-not-allowed disabled:opacity-50">{editingOrderId ? 'Guardar cambios' : 'Crear orden'}</button>
             </div>
           </form>
         </div>
