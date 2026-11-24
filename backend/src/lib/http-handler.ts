@@ -1,8 +1,10 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { Readable } from 'node:stream'
 import { compare } from 'bcryptjs'
 import { Prisma, Role } from '../generated/prisma/client'
 import { prisma } from './prisma'
+import { uploadthingHandler } from './uploadthing'
 import { getRelationalWorkshopData, saveRelationalWorkshopData } from './workshop-state'
 
 const frontendPort = Number(process.env.VITE_PORT ?? 5173)
@@ -146,13 +148,65 @@ async function authenticatedUser(request: IncomingMessage): Promise<Authenticate
   return session.user
 }
 
+function nodeRequestToWebRequest(req: IncomingMessage, url: URL): Request {
+  const method = req.method ?? 'GET'
+  const hasBody = method !== 'GET' && method !== 'HEAD'
+
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value === undefined) continue
+    if (Array.isArray(value)) {
+      for (const v of value) headers.append(key, v)
+    } else {
+      headers.set(key, value)
+    }
+  }
+
+  const body = hasBody ? (Readable.toWeb(req) as ReadableStream) : undefined
+
+  return new Request(url, {
+    method,
+    headers,
+    body,
+    // @ts-ignore Node.js requires duplex: 'half' when body is a stream
+    duplex: 'half',
+  })
+}
+
+async function sendWebResponse(res: ServerResponse, webResponse: Response): Promise<void> {
+  res.statusCode = webResponse.status
+  webResponse.headers.forEach((value, key) => {
+    res.setHeader(key, value)
+  })
+
+  if (!webResponse.body) {
+    res.end()
+    return
+  }
+
+  const reader = webResponse.body.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      res.write(value)
+    }
+  } finally {
+    res.end()
+  }
+}
+
 export async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const origin = request.headers.origin
   if (origin && allowedOrigins.has(origin)) {
     response.setHeader('Access-Control-Allow-Origin', origin)
     response.setHeader('Vary', 'Origin')
-    response.setHeader('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS')
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    response.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, x-uploadthing-version, x-uploadthing-package, x-uploadthing-fe-package',
+    )
+    response.setHeader('Access-Control-Allow-Credentials', 'true')
   }
   if (request.method === 'OPTIONS') {
     response.writeHead(204)
@@ -168,6 +222,20 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     } catch (error) {
       console.error('Database health check failed:', error)
       sendJson(response, 503, { status: 'error', database: 'unavailable' })
+    }
+    return
+  }
+
+  if (url.pathname === '/api/uploadthing' || url.pathname.startsWith('/api/uploadthing/')) {
+    try {
+      const webRequest = nodeRequestToWebRequest(request, url)
+      const webResponse = await uploadthingHandler(webRequest)
+      await sendWebResponse(response, webResponse)
+    } catch (error) {
+      console.error('Error procesando solicitud de UploadThing:', error)
+      sendJson(response, 500, {
+        error: error instanceof Error ? error.message : 'Error en el servidor de UploadThing.',
+      })
     }
     return
   }

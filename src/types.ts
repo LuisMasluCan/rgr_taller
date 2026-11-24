@@ -133,6 +133,7 @@ export type Payment = {
 export type OrderPhoto = {
   name: string
   dataUrl: string
+  key?: string
 }
 
 export type WorkshopSettings = {
