@@ -2,7 +2,6 @@ import {
   Archive,
   ArrowLeft,
   ArrowRight,
-  Camera,
   CalendarDays,
   Check,
   CircleDollarSign,
@@ -24,7 +23,7 @@ import {
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useDemoData } from '../contexts/useDemoData'
 import NumericInput from '../components/NumericInput'
@@ -82,7 +81,6 @@ const blankDraft = (): OrderDraft => ({
 
 const maxArrivalPhotos = 10
 //const maxPhotoSize = 12 * 1024 * 1024
-const maxOptimizedPhotoSize = 480 * 1024
 const currency = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 2 })
 const cashPaymentMethodByLabel: Record<string, NonNullable<CashMovement['paymentMethod']>> = {
   Efectivo: 'Efectivo',

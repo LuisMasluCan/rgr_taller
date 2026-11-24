@@ -33,7 +33,7 @@ export const ourFileRouter = {
       const token = getSessionTokenFromHeaders(cookie)
       if (!token) {
         throw new UploadThingError({
-          code: 'UNAUTHORIZED',
+          code: 'FORBIDDEN',
           message: 'Inicia sesión como administrador para subir fotografías.',
         })
       }
@@ -50,7 +50,7 @@ export const ourFileRouter = {
 
       if (!session || session.expiresAt <= new Date() || session.user.role !== Role.ADMIN) {
         throw new UploadThingError({
-          code: 'UNAUTHORIZED',
+          code: 'FORBIDDEN',
           message: 'Sesión no válida o expirada.',
         })
       }
