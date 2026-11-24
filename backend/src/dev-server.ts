@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') })
 dotenv.config({ path: path.resolve(process.cwd(), '..', '.env') })
+process.env.NODE_ENV = process.env.NODE_ENV ?? 'development'
 
 async function startServer(): Promise<void> {
   const { handleRequest } = await import('./lib/http-handler.js')

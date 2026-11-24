@@ -65,9 +65,15 @@ export const ourFileRouter = {
 
 export type OurFileRouter = typeof ourFileRouter
 
+const isDev = process.env.NODE_ENV !== 'production'
+
 export const uploadthingHandler = createRouteHandler({
   router: ourFileRouter,
   config: {
     token: process.env.UPLOADTHING_TOKEN,
+    isDev,
+    callbackUrl:
+      process.env.UPLOADTHING_CALLBACK_URL ||
+      (isDev ? `http://127.0.0.1:${process.env.API_PORT ?? 3001}/api/uploadthing` : undefined),
   },
 })
