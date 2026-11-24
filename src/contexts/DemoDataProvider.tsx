@@ -212,6 +212,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
   const version = useRef(0)
   const lastSavedSnapshot = useRef('')
   const saveQueue = useRef<Promise<void>>(Promise.resolve())
+  const pendingInventoryBaseline = useRef<InventoryItem[] | null>(null)
 
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -323,6 +324,20 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!dataLoaded) return
+    if (pendingInventoryBaseline.current) {
+      const nextInventory = pendingInventoryBaseline.current
+      pendingInventoryBaseline.current = null
+      try {
+        const base = JSON.parse(lastSavedSnapshot.current) as Record<string, unknown>
+        base.inventory = nextInventory
+        lastSavedSnapshot.current = JSON.stringify(base)
+      } catch {
+        lastSavedSnapshot.current = serializedSnapshot
+      }
+      setIsSaving(false)
+      setStorageError(null)
+      return
+    }
     if (serializedSnapshot === lastSavedSnapshot.current) {
       setIsSaving(false)
       return
@@ -410,6 +425,67 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
     }
   }, [dataLoaded, serializedSnapshot])
 
+  const saveInventoryItem = async (item: InventoryItem, editing: boolean) => {
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 20_000)
+    try {
+      const response = await fetch('/api/inventory', {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item }),
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error(await responseError(response))
+      const body: unknown = await response.json()
+      if (!isRecord(body) || !isRecord(body.item)) {
+        throw new Error('El servidor devolvió un ítem de inventario inválido.')
+      }
+      const savedItem = body.item as unknown as InventoryItem
+      setInventory((current) => {
+        const next = editing
+          ? current.map((entry) => entry.id === savedItem.id ? savedItem : entry)
+          : [savedItem, ...current.filter((entry) => entry.id !== savedItem.id)]
+        pendingInventoryBaseline.current = next
+        return next
+      })
+      setStorageError(null)
+    } catch (error) {
+      throw new Error(error instanceof DOMException && error.name === 'AbortError'
+        ? 'La operación tardó demasiado. Revisa tu conexión e inténtalo nuevamente.'
+        : error instanceof Error
+          ? error.message
+          : 'No se pudo guardar el ítem.')
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  }
+
+  const deleteInventoryItem = async (id: string) => {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), 20_000)
+    try {
+      const response = await fetch(`/api/inventory/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error(await responseError(response))
+      setInventory((current) => {
+        const next = current.filter((entry) => entry.id !== id)
+        pendingInventoryBaseline.current = next
+        return next
+      })
+      setStorageError(null)
+    } catch (error) {
+      throw new Error(error instanceof DOMException && error.name === 'AbortError'
+        ? 'La operación tardó demasiado. Revisa tu conexión e inténtalo nuevamente.'
+        : error instanceof Error
+          ? error.message
+          : 'No se pudo eliminar el ítem.')
+    } finally {
+      window.clearTimeout(timeoutId)
+    }
+  }
+
   const resetDemoData = () => {
     setAppointments([])
     setClients([])
@@ -464,6 +540,8 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
         appointments, setAppointments,
         clients, setClients,
         inventory, setInventory,
+        saveInventoryItem,
+        deleteInventoryItem,
         workshopAssets, setWorkshopAssets,
         workshopCategories, setWorkshopCategories,
         bankAccounts, setBankAccounts,

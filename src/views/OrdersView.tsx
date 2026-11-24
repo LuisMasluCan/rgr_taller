@@ -27,6 +27,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useDemoData } from '../contexts/useDemoData'
 import NumericInput from '../components/NumericInput'
+import { PageSizeSelector, PaginationFooter } from '../components/TablePagination'
 import OrderActionsDropdown, { type OrderDocumentKind } from '../components/OrderActionsDropdown'
 import WorkOrderPDFTemplate from '../components/WorkOrderPDFTemplate'
 import { orderStages } from '../data/orderStages'
@@ -138,6 +139,8 @@ function OrdersView() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeStage = orderStages.find((stage) => stage.name === searchParams.get('stage'))?.name ?? 'Entrega'
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [clientSearch, setClientSearch] = useState('')
   const [vehicleSearch, setVehicleSearch] = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
@@ -287,6 +290,9 @@ function OrdersView() {
       }),
     [activeStage, appliedSearch, clientSearch, dateFrom, dateTo, serviceOrders, vehicleSearch],
   )
+  const pageCount = Math.max(1, Math.ceil(visibleOrders.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const paginatedOrders = visibleOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   const openEditOrder = (order: Order) => {
     orderSubmissionStarted.current = false
@@ -837,7 +843,7 @@ function OrdersView() {
         </div>
 
         <div className="space-y-3 border-t border-slate-800 px-4 pb-5 sm:px-6">
-          {visibleOrders.length ? visibleOrders.map((order) => (
+          {paginatedOrders.length ? paginatedOrders.map((order) => (
             <article key={order.id} className="rounded-xl border border-slate-700 bg-slate-900 transition hover:border-slate-500 hover:shadow-lg">
               <div className="flex flex-col gap-4 p-4 sm:p-5">
                 <div className="min-w-0 flex-1">
@@ -910,9 +916,9 @@ function OrdersView() {
             </div>
           )}
         </div>
-        <div className="flex items-center justify-between border-t border-slate-800 px-5 py-3 text-[11px] text-slate-400 sm:px-6">
-          <span>Mostrando {visibleOrders.length} de {serviceOrders.length} órdenes</span>
-          <span>Etapa: {activeStage}</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 px-5 py-3 text-[11px] text-slate-400 sm:px-6">
+          <PageSizeSelector pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+          <PaginationFooter page={currentPage} pageCount={pageCount} pageSize={pageSize} total={visibleOrders.length} recordLabel="órdenes" onPageChange={setPage} />
         </div>
       </section>
 

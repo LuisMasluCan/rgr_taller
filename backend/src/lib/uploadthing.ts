@@ -65,15 +65,32 @@ export const ourFileRouter = {
 
 export type OurFileRouter = typeof ourFileRouter
 
-const isDev = process.env.NODE_ENV !== 'production'
+export function uploadthingHandler(request: Request): Promise<Response> {
+  const token = process.env.UPLOADTHING_TOKEN
+  if (!token) {
+    return Promise.resolve(new Response(
+      JSON.stringify({ error: 'UPLOADTHING_TOKEN no está disponible en el runtime del backend.' }),
+      {
+        status: 503,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      },
+    ))
+  }
 
-export const uploadthingHandler = createRouteHandler({
-  router: ourFileRouter,
-  config: {
-    token: process.env.UPLOADTHING_TOKEN,
-    isDev,
-    callbackUrl:
-      process.env.UPLOADTHING_CALLBACK_URL ||
-      (isDev ? `http://127.0.0.1:${process.env.API_PORT ?? 3001}/api/uploadthing` : undefined),
-  },
-})
+  const runtimeIsDev = process.env.NODE_ENV !== 'production'
+  const handler = createRouteHandler({
+    router: ourFileRouter,
+    config: {
+      token,
+      isDev: runtimeIsDev,
+      callbackUrl:
+        process.env.UPLOADTHING_CALLBACK_URL ||
+        (runtimeIsDev ? `http://127.0.0.1:${process.env.API_PORT ?? 3001}/api/uploadthing` : undefined),
+    },
+  })
+  return handler(request)
+}
+
+export function hasUploadthingToken(): boolean {
+  return Boolean(process.env.UPLOADTHING_TOKEN?.trim())
+}

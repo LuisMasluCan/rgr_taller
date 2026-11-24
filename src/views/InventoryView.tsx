@@ -56,7 +56,7 @@ const inputClass = 'h-10 w-full rounded-lg border border-slate-700 bg-slate-900 
 const inventoryTypes: InventoryType[] = ['Mano de Obra', 'Repuesto', 'Insumo', 'Servicio Compuesto']
 
 function InventoryView() {
-  const { inventory, setInventory, settings } = useDemoData()
+  const { inventory, saveInventoryItem, deleteInventoryItem, settings } = useDemoData()
   const location = useLocation()
   const currentSection = location.pathname.endsWith('/equipment')
     ? 'equipment'
@@ -70,6 +70,7 @@ function InventoryView() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<InventoryDraft>(emptyDraft)
   const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const filteredItems = useMemo(
     () => inventory.filter((item) =>
@@ -139,7 +140,7 @@ function InventoryView() {
     setModalOpen(true)
   }
 
-  const saveItem = (event: FormEvent<HTMLFormElement>) => {
+  const saveItem = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const id = editingId ?? draft.id.trim().toUpperCase()
     const duplicate = inventory.some((item) => item.id === id && item.id !== editingId)
@@ -171,14 +172,27 @@ function InventoryView() {
         : undefined,
     }
 
-    setInventory((current) => editingId
-      ? current.map((existing) => existing.id === editingId ? item : existing)
-      : [item, ...current])
-    if (!editingId) setPage(1)
-    setModalOpen(false)
+    setSaving(true)
+    setFormError('')
+    try {
+      await saveInventoryItem(item, Boolean(editingId))
+      if (!editingId) setPage(1)
+      setModalOpen(false)
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'No se pudo guardar el ítem.')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const deleteItem = (id: string) => setInventory((current) => current.filter((item) => item.id !== id))
+  const deleteItem = async (id: string) => {
+    if (!window.confirm('¿Eliminar este ítem del inventario?')) return
+    try {
+      await deleteInventoryItem(id)
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'No se pudo eliminar el ítem.')
+    }
+  }
 
   if (currentSection !== 'items') {
     const label = currentSection === 'equipment' ? 'Planta y equipo' : 'Categorías'
@@ -305,7 +319,7 @@ function InventoryView() {
               <Field label="Descripción"><textarea value={draft.details} onChange={(event) => setDraft({ ...draft, details: event.target.value })} placeholder="Descripción adicional" rows={2} className="w-full rounded-lg border border-slate-700 px-3 py-2 text-xs outline-none focus:border-slate-700" /></Field>
             </div>
             {formError && <p role="alert" className="text-xs font-medium text-rose-300">{formError}</p>}
-            <div className="flex justify-end gap-2 border-t border-slate-800 pt-4"><button type="button" onClick={() => setModalOpen(false)} className="rounded-lg border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:bg-slate-800">Cancelar</button><button type="submit" className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-lime-400">{editingId ? 'Guardar cambios' : 'Crear registro'}</button></div>
+            <div className="flex justify-end gap-2 border-t border-slate-800 pt-4"><button type="button" disabled={saving} onClick={() => setModalOpen(false)} className="rounded-lg border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-400 hover:bg-slate-800 disabled:cursor-wait disabled:opacity-50">Cancelar</button><button type="submit" disabled={saving} className="rounded-lg bg-lime-300 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-lime-400 disabled:cursor-wait disabled:opacity-60">{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear registro'}</button></div>
           </form>
         </Modal>
       )}

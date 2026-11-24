@@ -16,6 +16,8 @@ export type DemoDataContextValue = {
   setClients: React.Dispatch<React.SetStateAction<Client[]>>
   inventory: InventoryItem[]
   setInventory: React.Dispatch<React.SetStateAction<InventoryItem[]>>
+  saveInventoryItem: (item: InventoryItem, editing: boolean) => Promise<void>
+  deleteInventoryItem: (id: string) => Promise<void>
   workshopAssets: WorkshopAsset[]
   setWorkshopAssets: React.Dispatch<React.SetStateAction<WorkshopAsset[]>>
   workshopCategories: WorkshopCategory[]

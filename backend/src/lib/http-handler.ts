@@ -1,10 +1,10 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { compare } from 'bcryptjs'
-import { Prisma, Role } from '../generated/prisma/client'
+import { ItemType, Prisma, Role } from '../generated/prisma/client'
 import { prisma } from './prisma'
-import { uploadthingHandler } from './uploadthing'
+import { hasUploadthingToken, uploadthingHandler } from './uploadthing'
 import { getRelationalWorkshopData, saveRelationalWorkshopData } from './workshop-state'
 
 const frontendPort = Number(process.env.VITE_PORT ?? 5173)
@@ -22,8 +22,6 @@ const allowedOrigins = new Set(
   ],
 )
 const maximumBodyBytes = 4 * 1024 * 1024
-const maximumPhotoRequestBytes = 4.25 * 1024 * 1024
-const maximumPhotoBytes = 3 * 1024 * 1024
 const sessionCookieName = 'rgr_admin_session'
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7
 const loginWindowMilliseconds = 15 * 60 * 1000
@@ -197,6 +195,7 @@ async function sendWebResponse(res: ServerResponse, webResponse: Response): Prom
 }
 
 export async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const method = request.method ?? 'GET'
   const origin = request.headers.origin
   if (origin && allowedOrigins.has(origin)) {
     response.setHeader('Access-Control-Allow-Origin', origin)
@@ -218,7 +217,11 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
   if (url.pathname === '/api/health' && request.method === 'GET') {
     try {
       await prisma.$queryRaw`SELECT 1`
-      sendJson(response, 200, { status: 'ok', database: 'connected' })
+      sendJson(response, 200, {
+        status: 'ok',
+        database: 'connected',
+        uploadthingTokenConfigured: hasUploadthingToken(),
+      })
     } catch (error) {
       console.error('Database health check failed:', error)
       sendJson(response, 503, { status: 'error', database: 'unavailable' })
@@ -345,89 +348,198 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     return
   }
 
-  const photoMatch = url.pathname.match(/^\/api\/photos\/([0-9a-f-]{36})$/i)
-  if (photoMatch && request.method === 'GET') {
-    try {
-      const user = await authenticatedUser(request)
-      if (!user) {
-        sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
+  if (url.pathname === '/api/inventory' && method === 'GET') {
+      try {
+        const user = await authenticatedUser(request)
+        if (!user) {
+          sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
+          return
+        }
+        const items = await prisma.item.findMany({
+          where: { isActive: true },
+          include: { category: true },
+          orderBy: { name: 'asc' },
+        })
+        const itemNames: Record<ItemType, string> = {
+          LABOR: 'Mano de Obra',
+          PART: 'Repuesto',
+          SUPPLY: 'Insumo',
+          EXTERNAL_SERVICE: 'Servicio Compuesto',
+        }
+        sendJson(response, 200, {
+          items: items.map((item) => {
+            const legacy = isRecord(item.legacyData) ? item.legacyData : {}
+            return {
+              ...legacy,
+              id: item.id,
+              description: item.name,
+              reference: item.sku ?? '',
+              cost: Number(item.cost),
+              price: Number(item.price),
+              taxRate: Number(item.taxRate),
+              stock: Number(item.stock),
+              type: typeof legacy.type === 'string' ? legacy.type : itemNames[item.type],
+              category: item.category?.name ?? (typeof legacy.category === 'string' ? legacy.category : ''),
+              unit: item.unit,
+              details: item.description ?? (typeof legacy.details === 'string' ? legacy.details : ''),
+            }
+          }),
+        })
+      } catch (error) {
+        console.error('Unable to load inventory:', error)
+        sendJson(response, 503, { error: 'No se pudo cargar el inventario.' })
+      }
+      return
+    }
+
+    if (url.pathname === '/api/inventory' && ['POST', 'PUT'].includes(method)) {
+      if (!requestOriginAllowed(request)) {
+        sendJson(response, 403, { error: 'Origen de solicitud no permitido.' })
         return
       }
-      const photo = await prisma.workshopPhoto.findUnique({ where: { id: photoMatch[1] } })
-      if (!photo) {
-        sendJson(response, 404, { error: 'No se encontró la fotografía.' })
+      let payload: unknown
+      try {
+        payload = await readJsonBody(request)
+      } catch (error) {
+        const status = isRecord(error) && typeof error.status === 'number' ? error.status : 400
+        sendJson(response, status, { error: error instanceof Error ? error.message : 'Solicitud inválida.' })
         return
       }
-      response.writeHead(200, {
-        'Content-Type': photo.contentType,
-        'Content-Length': photo.data.byteLength,
-        'Cache-Control': 'private, no-store',
-        'X-Content-Type-Options': 'nosniff',
-      })
-      response.end(photo.data)
-    } catch (error) {
-      console.error('Unable to load workshop photo:', error)
-      sendJson(response, 503, { error: 'No se pudo cargar la fotografía.' })
-    }
-    return
-  }
-
-  if (url.pathname === '/api/photos' && request.method === 'POST') {
-    if (!requestOriginAllowed(request)) {
-      sendJson(response, 403, { error: 'Origen de solicitud no permitido.' })
-      return
-    }
-    try {
-      const user = await authenticatedUser(request)
-      if (!user) {
-        sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
+      if (!isRecord(payload) || !isRecord(payload.item)) {
+        sendJson(response, 400, { error: 'Se requiere el ítem que se va a guardar.' })
         return
       }
-    } catch (error) {
-      console.error('Unable to verify photo upload session:', error)
-      sendJson(response, 503, { error: 'No se pudo verificar la sesión.' })
+      const item = payload.item
+      const id = typeof item.id === 'string' ? item.id.trim().toUpperCase() : ''
+      const description = typeof item.description === 'string' ? item.description.trim() : ''
+      if (!id || !description) {
+        sendJson(response, 400, { error: 'El código y el nombre del ítem son obligatorios.' })
+        return
+      }
+      try {
+        const user = await authenticatedUser(request)
+        if (!user) {
+          sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
+          return
+        }
+        const typeLabels: Record<string, ItemType> = {
+          'Mano de Obra': ItemType.LABOR,
+          'Mano de obra': ItemType.LABOR,
+          Repuesto: ItemType.PART,
+          Insumo: ItemType.SUPPLY,
+          'Servicio Compuesto': ItemType.EXTERNAL_SERVICE,
+          Adicional: ItemType.EXTERNAL_SERVICE,
+        }
+        const typeName = typeof item.type === 'string' ? item.type : 'Repuesto'
+        const categoryName = typeof item.category === 'string' ? item.category.trim() : ''
+        let categoryId: string | null = null
+        if (categoryName) {
+          const category = await prisma.category.upsert({
+            where: { name: categoryName },
+            create: { name: categoryName },
+            update: {},
+          })
+          categoryId = category.id
+        }
+        const numberValue = (value: unknown, fallback = 0) =>
+          typeof value === 'number' && Number.isFinite(value) ? value : fallback
+        const components = Array.isArray(item.components)
+          ? item.components
+              .filter(isRecord)
+              .map((component) => ({
+                itemId: typeof component.itemId === 'string' ? component.itemId : '',
+                quantity: numberValue(component.quantity, 1),
+              }))
+          : []
+        const legacyData: Prisma.InputJsonObject = {
+          type: typeName,
+          specialty: typeof item.specialty === 'string' ? item.specialty : '',
+          category: categoryName,
+          brand: typeof item.brand === 'string' ? item.brand : '',
+          marginPercent: numberValue(item.marginPercent),
+          location: typeof item.location === 'string' ? item.location : '',
+          ...(typeof item.laborHours === 'number' ? { laborHours: item.laborHours } : {}),
+          ...(typeof item.complexity === 'string' ? { complexity: item.complexity } : {}),
+          components,
+        }
+        const data = {
+          name: description,
+          type: typeLabels[typeName] ?? ItemType.EXTERNAL_SERVICE,
+          sku: typeof item.reference === 'string' && item.reference.trim() ? item.reference.trim().toUpperCase() : null,
+          description: typeof item.details === 'string' ? item.details.trim() : null,
+          unit: typeof item.unit === 'string' && item.unit.trim() ? item.unit.trim() : 'Unidad (und)',
+          cost: new Prisma.Decimal(numberValue(item.cost)),
+          price: new Prisma.Decimal(numberValue(item.price)),
+          taxRate: new Prisma.Decimal(numberValue(item.taxRate)),
+          stock: typeName === 'Mano de Obra' || typeName === 'Servicio Compuesto'
+            ? new Prisma.Decimal(999)
+            : new Prisma.Decimal(numberValue(item.stock)),
+          categoryId,
+          legacyData,
+          isActive: true,
+        }
+        const saved = await (method === 'POST'
+          ? prisma.item.create({ data: { id, ...data }, include: { category: true } })
+          : prisma.item.update({ where: { id }, data, include: { category: true } }))
+        sendJson(response, method === 'POST' ? 201 : 200, {
+          item: {
+            ...legacyData,
+            id: saved.id,
+            description: saved.name,
+            reference: saved.sku ?? '',
+            cost: Number(saved.cost),
+            price: Number(saved.price),
+            taxRate: Number(saved.taxRate),
+            stock: Number(saved.stock),
+            category: saved.category?.name ?? categoryName,
+            unit: saved.unit,
+            details: saved.description ?? '',
+          },
+        })
+      } catch (error) {
+        console.error('Unable to persist inventory item:', error)
+        if (isRecord(error) && error.code === 'P2002') {
+          sendJson(response, 409, { error: 'Ya existe un ítem con ese código o referencia.' })
+          return
+        }
+        sendJson(response, 503, { error: 'No se pudo guardar el ítem en Neon.' })
+      }
       return
     }
 
-    let payload: unknown
-    try {
-      payload = await readJsonBody(request, maximumPhotoRequestBytes)
-    } catch (error) {
-      const status = isRecord(error) && typeof error.status === 'number' ? error.status : 400
-      sendJson(response, status, { error: error instanceof Error ? error.message : 'Solicitud inválida.' })
-      return
-    }
-    if (!isRecord(payload) || typeof payload.name !== 'string' || typeof payload.dataUrl !== 'string') {
-      sendJson(response, 400, { error: 'Se requiere el nombre y el contenido de la fotografía.' })
+    const inventoryDeleteMatch = url.pathname.match(/^\/api\/inventory\/(.+)$/)
+    if (inventoryDeleteMatch && method === 'DELETE') {
+      if (!requestOriginAllowed(request)) {
+        sendJson(response, 403, { error: 'Origen de solicitud no permitido.' })
+        return
+      }
+      try {
+        const user = await authenticatedUser(request)
+        if (!user) {
+          sendJson(response, 401, { error: 'Inicia sesión para continuar.' })
+          return
+        }
+        await prisma.item.delete({ where: { id: decodeURIComponent(inventoryDeleteMatch[1]) } })
+        sendJson(response, 200, { id: decodeURIComponent(inventoryDeleteMatch[1]) })
+      } catch (error) {
+        console.error('Unable to delete inventory item:', error)
+        if (isRecord(error) && (error.code === 'P2003' || error.code === 'P2025')) {
+          sendJson(response, error.code === 'P2003' ? 409 : 404, {
+            error: error.code === 'P2003'
+              ? 'El ítem está relacionado con órdenes o cotizaciones y no puede eliminarse.'
+              : 'No se encontró el ítem.',
+          })
+          return
+        }
+        sendJson(response, 503, { error: 'No se pudo eliminar el ítem en Neon.' })
+      }
       return
     }
 
-    const imageMatch = payload.dataUrl.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]*={0,2})$/)
-    if (!imageMatch) {
-      sendJson(response, 400, { error: 'La fotografía debe estar en formato JPEG, PNG o WebP.' })
-      return
-    }
-    const data = Buffer.from(imageMatch[2], 'base64')
-    if (!data.length || data.byteLength > maximumPhotoBytes || data.toString('base64') !== imageMatch[2]) {
-      sendJson(response, 413, { error: 'La fotografía supera el límite permitido de 3 MB.' })
-      return
-    }
-
-    try {
-      const id = randomUUID()
-      await prisma.workshopPhoto.create({
-        data: {
-          id,
-          name: payload.name.slice(0, 255),
-          contentType: `image/${imageMatch[1]}`,
-          data,
-        },
-      })
-      sendJson(response, 201, { name: payload.name, dataUrl: `/api/photos/${id}` })
-    } catch (error) {
-      console.error('Unable to save workshop photo:', error)
-      sendJson(response, 503, { error: 'No se pudo guardar la fotografía en Neon.' })
-    }
+  if (url.pathname === '/api/photos' || url.pathname.startsWith('/api/photos/')) {
+    sendJson(response, 410, {
+      error: 'Las fotografías ahora se almacenan exclusivamente en UploadThing.',
+    })
     return
   }
 
