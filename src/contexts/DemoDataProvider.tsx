@@ -410,7 +410,7 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
           setStorageError(error instanceof Error ? error.message : 'No se pudieron guardar los cambios en Neon.')
           setIsSaving(serializedSnapshotRef.current !== lastSavedSnapshot.current)
         })
-    }, 350)
+    }, 1_500)
 
     const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
       if (serializedSnapshot === lastSavedSnapshot.current) return

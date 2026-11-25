@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
+import { gzipSync } from 'node:zlib'
 import { compare } from 'bcryptjs'
 import { ItemType, Prisma, Role } from '../generated/prisma/client'
 import { prisma } from './prisma'
@@ -57,11 +58,25 @@ function isJsonObject(value: unknown): value is Prisma.InputJsonObject {
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
+  const serialized = JSON.stringify(body)
+  const acceptEncoding = response.req?.headers?.['accept-encoding']
+  const acceptsGzip = typeof acceptEncoding === 'string' && acceptEncoding.includes('gzip')
+  if (acceptsGzip && Buffer.byteLength(serialized, 'utf8') >= 1024) {
+    const compressed = gzipSync(serialized)
+    response.writeHead(status, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Encoding': 'gzip',
+      'Cache-Control': 'no-store',
+      'Vary': 'Accept-Encoding',
+    })
+    response.end(compressed)
+    return
+  }
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
   })
-  response.end(JSON.stringify(body))
+  response.end(serialized)
 }
 
 async function readJsonBody(request: IncomingMessage, maximumBytes = maximumBodyBytes): Promise<unknown> {
